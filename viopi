@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+#
+# Recursively finds text files, concatenates their contents, and copies the
+# result to the clipboard. A powerful tool for preparing project context for LLMs.
+#
+# Usage:
+#   python copy_combine.py [preset_or_pattern_1] [preset_or_pattern_2] ...
+#
+import os
+import sys
+import fnmatch
+from pathlib import Path
+import subprocess
+import pyperclip
+import magic
+
+# --- Configuration ---
+PRESET_PREFIX = ".copy_combine_ignore_preset_"
+LOCAL_IGNORE_FILE = ".copy_combine_ignore"
+GLOBAL_IGNORE_FILE = Path.home() / ".copy_combine_ignore_global"
+
+# Define aliases for presets
+PRESET_ALIASES = {
+    ".xcode_project": ".xcode_strict",
+    ".macos_app": ".xcode_strict",
+    ".ios_app": ".xcode_strict",
+    ".visionos_app": ".xcode_strict",
+    ".watchos_app": ".xcode_strict",
+    ".react_app": ".node_project",
+    ".vue_app": ".node_project",
+    ".svelte_app": ".node_project",
+    ".nextjs_app": ".node_project",
+}
+
+# --- Helper Functions ---
+
+def is_binary(file_path: Path) -> bool:
+    """
+    Uses python-magic to determine if a file is binary.
+    Returns True for binary files, False for text files or empty files.
+    """
+    if file_path.stat().st_size == 0:
+        return False  # Treat empty files as text
+    try:
+        mime_type = magic.from_file(str(file_path), mime=True)
+        return not (mime_type.startswith("text/") or mime_type == 'inode/x-empty')
+    except magic.MagicException:
+        # If magic has an issue, fall back to a simpler check
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                f.read(1024) # Try reading a small chunk
+            return False
+        except UnicodeDecodeError:
+            return True
+
+
+def get_preset_patterns(preset_name: str) -> list[str]:
+    """
+    Loads ignore patterns from a preset file in the home directory.
+    """
+    preset_filename_suffix = preset_name.lstrip('.')
+    preset_file = Path.home() / f"{PRESET_PREFIX}{preset_filename_suffix}"
+    if preset_file.is_file():
+        return [
+            line for line in preset_file.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+    return []
+
+
+def print_tree(root_dir: Path, ignore_patterns: list[str]):
+    """
+    Prints the directory tree, honoring the ignore patterns.
+    """
+    try:
+        tree_cmd = ["tree"]
+        for pattern in set(ignore_patterns):
+            tree_cmd.extend(["-I", pattern])
+        
+        # Check if tree command exists and run it
+        if subprocess.run(["command", "-v", "tree"], capture_output=True).returncode == 0:
+            print("Directory tree (ignoring specified patterns):")
+            subprocess.run(tree_cmd, cwd=root_dir)
+        else:
+            print("Directory tree: ('tree' command not found, skipping)")
+    except Exception as e:
+        print(f"Could not generate directory tree: {e}")
+
+
+def main():
+    """Main execution function."""
+    
+    # --- Aggregate Ignore Patterns ---
+    ignore_patterns = {".DS_Store", LOCAL_IGNORE_FILE, Path(__file__).name}
+    sources_of_ignores = {"Defaults": list(ignore_patterns)}
+
+    # Read from global and local ignore files
+    for ignore_file in [GLOBAL_IGNORE_FILE, Path.cwd() / LOCAL_IGNORE_FILE]:
+        if ignore_file.is_file():
+            patterns = [
+                line for line in ignore_file.read_text().splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+            if patterns:
+                sources_of_ignores[ignore_file.name] = patterns
+                ignore_patterns.update(patterns)
+
+    # Process command-line arguments
+    activated_presets = set()
+    literal_args = []
+    for arg in sys.argv[1:]:
+        preset_to_check = PRESET_ALIASES.get(arg, arg)
+        patterns = get_preset_patterns(preset_to_check)
+        if patterns:
+            activated_presets.add(arg)
+            sources_of_ignores[f"Preset: {arg}"] = patterns
+            ignore_patterns.update(patterns)
+        else:
+            literal_args.append(arg)
+    
+    if literal_args:
+        sources_of_ignores["Arguments"] = literal_args
+        ignore_patterns.update(literal_args)
+
+    # --- Print Ignored Patterns ---
+    print("🔎 Activating ignore patterns...")
+    for source, patterns in sources_of_ignores.items():
+        print(f"  - From {source}:")
+        for p in sorted(patterns):
+            print(f"    - {p}")
+    print("----------------------------------------")
+    
+    # --- Walk Directory and Collect Files ---
+    files_to_cat = []
+    root_dir = Path.cwd()
+    
+    for root, dirs, files in os.walk(root_dir, topdown=True):
+        # Prune directories based on ignore patterns
+        # We modify 'dirs' in-place, which os.walk respects
+        dirs[:] = [d for d in dirs if not any(fnmatch.fnmatch(d, p) for p in ignore_patterns)]
+        
+        for filename in files:
+            file_path = Path(root) / filename
+            
+            # Check if the file should be ignored by name
+            if any(fnmatch.fnmatch(filename, p) for p in ignore_patterns):
+                continue
+                
+            # Check if the file is binary
+            if is_binary(file_path):
+                continue
+                
+            files_to_cat.append(file_path)
+
+    # --- Build Final Output ---
+    output_parts = []
+    output_parts.append(f"Current path: {root_dir}\n")
+    
+    # Use a temporary file to capture the tree output
+    tree_output = ""
+    try:
+        tree_cmd = ["tree"] + [arg for p in set(ignore_patterns) for arg in ["-I", p]]
+        if subprocess.run(["command", "-v", "tree"], capture_output=True, text=True).returncode == 0:
+            tree_output = "Directory tree (ignoring specified patterns):\n"
+            tree_output += subprocess.check_output(tree_cmd, cwd=root_dir, text=True)
+        else:
+            tree_output = "Directory tree: ('tree' command not found, skipping)"
+    except Exception:
+        tree_output = "Directory tree: (failed to generate)"
+        
+    output_parts.append(tree_output)
+    output_parts.append("\n\n---\nCombined file contents:\n")
+
+    if not files_to_cat:
+        output_parts.append("No text files found to copy after applying ignore patterns.")
+    else:
+        for file_path in sorted(files_to_cat):
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    # output_parts.append(f"\n--- FILE: {file_path.relative_to(root_dir)} ---\n")
+                    output_parts.append(content)
+            except Exception as e:
+                output_parts.append(f"\n--- ERROR: Could not read {file_path.relative_to(root_dir)}: {e} ---\n")
+    
+    # --- Copy to Clipboard and Confirm ---
+    final_output = "".join(output_parts)
+    pyperclip.copy(final_output)
+
+    print("✅ Combined contents copied to the clipboard.")
+    if activated_presets:
+        print("Activated presets:")
+        for preset in sorted(list(activated_presets)):
+            print(f"  - {preset}")
+
+if __name__ == "__main__":
+    main()
