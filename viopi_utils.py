@@ -7,8 +7,10 @@ import fnmatch
 from pathlib import Path
 import subprocess
 import magic
+import shutil # <--- FIX: IMPORT SHUTIL
 
 # --- Configuration (now supports both .copy_combine_ignore and .viopi_ignore) ---
+# ... (The rest of the configuration is unchanged) ...
 LOCAL_IGNORE_FILES = (".copy_combine_ignore", ".viopi_ignore")
 GLOBAL_IGNORE_FILES = (
     Path.home() / ".copy_combine_ignore_global",
@@ -16,7 +18,6 @@ GLOBAL_IGNORE_FILES = (
 )
 PRESET_PREFIXES = (".copy_combine_ignore_preset_", ".viopi_ignore_preset_")
 
-# Define aliases for presets
 PRESET_ALIASES = {
     ".xcode_project": ".xcode_strict",
     ".macos_app": ".xcode_strict",
@@ -29,15 +30,16 @@ PRESET_ALIASES = {
     ".nextjs_app": ".node_project",
 }
 
-# --- Helper Functions ---
 
+# --- Helper Functions ---
+# ... (The helper functions are unchanged) ...
 def is_binary(file_path: Path) -> bool:
     """
     Uses python-magic to determine if a file is binary. This version is robust
     and handles common text-like application types.
     """
     if not file_path.is_file() or file_path.stat().st_size == 0:
-        return False  # Treat empty files or non-files as ignorable
+        return False
 
     KNOWN_TEXT_MIMES = {
         'application/json', 'application/javascript', 'application/xml',
@@ -50,13 +52,12 @@ def is_binary(file_path: Path) -> bool:
         if mime_type.startswith("text/") or mime_type in KNOWN_TEXT_MIMES:
             return False
         if mime_type in ['application/octet-stream', 'inode/x-empty']:
-            pass # Fall through to read-based check
+            pass
         else:
-            return True # Known non-text type (e.g., image/jpeg)
+            return True
     except magic.MagicException:
-        pass # Fall through to read-based check
+        pass
 
-    # Fallback check for when magic is unsure or unavailable
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             f.read(1024)
@@ -81,6 +82,7 @@ def get_preset_patterns(preset_name: str) -> list[str]:
             ]
     return []
 
+
 # --- Core Logic Function ---
 
 def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tuple[str, str]:
@@ -91,13 +93,12 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
     Returns:
         tuple[str, str]: A tuple containing (final_output_string, summary_string).
     """
+    # ... (The ignore pattern aggregation is unchanged) ...
     status_lines = []
     
-    # --- Aggregate Ignore Patterns ---
     ignore_patterns = {".DS_Store", *LOCAL_IGNORE_FILES, Path(__file__).name, "viopi"}
     sources_of_ignores = {"Defaults": list(ignore_patterns)}
 
-    # Read from global ignore files
     for ignore_file in GLOBAL_IGNORE_FILES:
         if ignore_file.is_file():
             patterns = [p for p in ignore_file.read_text().splitlines() if p.strip() and not p.strip().startswith("#")]
@@ -105,7 +106,6 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
                 sources_of_ignores[ignore_file.name] = patterns
                 ignore_patterns.update(patterns)
 
-    # Read from local ignore files
     for fname in LOCAL_IGNORE_FILES:
         ignore_file = root_dir / fname
         if ignore_file.is_file():
@@ -114,7 +114,6 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
                 sources_of_ignores[ignore_file.name] = patterns
                 ignore_patterns.update(patterns)
 
-    # Process command-line patterns/presets
     activated_presets = set()
     literal_args = []
     for arg in custom_patterns:
@@ -131,7 +130,6 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
         sources_of_ignores["Arguments"] = literal_args
         ignore_patterns.update(literal_args)
 
-    # --- Build Status Report ---
     status_lines.append("🔎 Activating ignore patterns...")
     for source, patterns in sources_of_ignores.items():
         status_lines.append(f"  - From {source}:")
@@ -139,13 +137,11 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
             status_lines.append(f"    - {p}")
     status_lines.append("----------------------------------------")
     
-    # --- Walk Directory and Collect Files ---
     files_to_cat = []
     unique_ignore_patterns = set(ignore_patterns)
 
     for root, dirs, files in os.walk(root_dir, topdown=True, followlinks=False):
         current_path = Path(root)
-        # Prune directories based on ignore patterns (name or relative path)
         dirs[:] = [d for d in dirs if not any(
             fnmatch.fnmatch(d, p) or fnmatch.fnmatch(str((current_path / d).relative_to(root_dir)), p)
             for p in unique_ignore_patterns
@@ -155,7 +151,6 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
             file_path = current_path / filename
             relative_path_str = str(file_path.relative_to(root_dir))
             
-            # Check if the file should be ignored by name or relative path
             if any(fnmatch.fnmatch(filename, p) or fnmatch.fnmatch(relative_path_str, p) for p in unique_ignore_patterns):
                 continue
                 
@@ -167,15 +162,19 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
     # --- Build Final Output ---
     output_parts = [f"Current path: {root_dir}\n"]
     
+    # +++ THIS BLOCK IS THE FIX +++
     try:
-        tree_cmd = ["tree"] + [arg for p in unique_ignore_patterns for arg in ["-I", p]]
-        if subprocess.run(["command", "-v", "tree"], capture_output=True, text=True).returncode == 0:
+        # Use shutil.which to find the tree command in the system's PATH
+        if shutil.which("tree"):
+            tree_cmd = ["tree"] + [arg for p in unique_ignore_patterns for arg in ["-I", p]]
             tree_output = "Directory tree (ignoring specified patterns):\n"
             tree_output += subprocess.check_output(tree_cmd, cwd=root_dir, text=True, stderr=subprocess.DEVNULL)
         else:
             tree_output = "Directory tree: ('tree' command not found, skipping)"
     except Exception as e:
+        # This will catch errors from the subprocess call itself
         tree_output = f"Directory tree: (failed to generate: {e})"
+    # +++ END OF FIX BLOCK +++
         
     output_parts.append(tree_output)
     output_parts.append("\n\n---\nCombined file contents:\n")
@@ -192,7 +191,6 @@ def generate_project_context(root_dir: Path, custom_patterns: list[str]) -> tupl
             except Exception as e:
                 output_parts.append(f"\n--- ERROR: Could not read {file_path.relative_to(root_dir)}: {e} ---\n")
     
-    # --- Build Final Summary ---
     summary_lines = []
     if activated_presets:
         summary_lines.append("Activated presets:")
