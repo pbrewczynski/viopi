@@ -27,6 +27,14 @@ except ImportError:
     sys.exit(1)
 
 
+def print_output_stats(output_string):
+    """Calculates and prints the line and character count of the final output."""
+    lines = len(output_string.splitlines())
+    chars = len(output_string)
+    # Using f-string with comma for thousands separator for better readability
+    print(f"📊 Stats: {lines:,} lines, {chars:,} characters.", file=sys.stderr)
+
+
 def main():
     """Parses arguments, calls the core logic, and handles the final output."""
     args = sys.argv[1:]
@@ -86,18 +94,18 @@ def main():
     # Print status and summary reports to stderr so they don't interfere with stdout
     print(summary_report, file=sys.stderr)
 
-    # --- Handle Final Output (No changes in this block) ---
+    # --- Handle Final Output ---
     if stdout_mode:
         print(final_output)
         print("\n✅ Done. Output sent to stdout.", file=sys.stderr)
+        # Also print stats for stdout mode for consistency
+        print_output_stats(final_output)
     elif copy_mode:
         try:
             import pyperclip
             pyperclip.copy(final_output)
             print("\n✅ Combined contents copied to the clipboard.", file=sys.stderr)
-            # sys.co
-            # sys.
-            # os.command
+            print_output_stats(final_output) # Print stats after copying
         except (ImportError, pyperclip.PyperclipException) as e:
             print("\n❌ Error: Could not copy to clipboard.", file=sys.stderr)
             print("   'pyperclip' may not be installed or configured.", file=sys.stderr)
@@ -110,6 +118,7 @@ def main():
                 f.write(final_output)
             full_output_path = Path(output_filename).resolve()
             print(f"\n✅ Combined contents saved to file: {full_output_path}", file=sys.stderr)
+            print_output_stats(final_output) # Print stats after saving
         except IOError as e:
             print(f"\n❌ Error: Could not write to file '{output_filename}'.", file=sys.stderr)
             print(f"   Details: {e}", file=sys.stderr)
