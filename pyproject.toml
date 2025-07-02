@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viopi"
+version = "0.1.0"
+description = "Saves command output and shows statistics on it."
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Utilities",
+]
+
+# This creates the `viopi` command that users can run from their terminal
+[project.scripts]
+viopi = "viopi.main:main"
+
+[tool.setuptools.packages.find]
+# Automatically find packages under the 'src' directory
+where = ["src"]

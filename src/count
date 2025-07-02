@@ -1,0 +1,61 @@
+#!/usr/bin/env zsh
+
+# This script counts lines and characters from a file argument or stdin.
+
+# Decide input: file if given, else stdin
+if [[ -n "$1" ]]; then
+  if [[ ! -r "$1" ]]; then
+    echo "Error: cannot read ‘$1’" >&2
+    exit 1
+  fi
+  input="$1"
+else
+  input=/dev/stdin
+fi
+
+# awk does a one-pass count.
+awk '
+  {
+    lines++
+    chars += length($0) + 1 # +1 for the newline character
+  }
+  END {
+    print "Lines: " lines
+    print "Characters: " chars
+  }
+' "$input"
+```
+
+#### **`src/viopi_stats/main.py`** (The Python wrapper)
+This script is the entry point for your command. It finds and runs the `count.zsh` script.
+
+```python
+# FILE: src/viopi_stats/main.py
+
+import sys
+import subprocess
+from importlib import resources
+
+def run():
+    """
+    Finds and executes the count.zsh script, passing along arguments.
+    """
+    try:
+        # This returns a path-like object to the script inside the installed package
+        script_path_obj = resources.files('viopi_stats').joinpath('count.zsh')
+        
+        with resources.as_file(script_path_obj) as script_path:
+            # The 'as_file' context manager gives us a real filesystem path.
+            # We must make the script executable.
+            script_path.chmod(0o755)
+            
+            # The command is the script path + any command-line arguments passed to our tool
+            command = [str(script_path)] + sys.argv[1:]
+            
+            # Run the command. The zsh script handles its own error printing.
+            result = subprocess.run(command)
+            sys.exit(result.returncode)
+
+    except Exception as e:
+        print(f"An error occurred while trying to run the script: {e}", file=sys.stderr)
+        sys.exit(1)
