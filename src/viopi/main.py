@@ -37,6 +37,9 @@ def main():
     follow_links_mode = True  # <-- MODIFIED: Default is now True
     output_filename = ".output.viopi"
 
+        
+        
+
     if "--stdout" in args:
         stdout_mode = True
         args.remove("--stdout")
@@ -59,6 +62,7 @@ def main():
         else:
             pattern_args.append(arg)
     
+
     if len(path_args) > 1:
         print(f"⚠️  Warning: Multiple directory paths provided. Using the first one: '{path_args[0]}'", file=sys.stderr)
     
@@ -91,6 +95,9 @@ def main():
             import pyperclip
             pyperclip.copy(final_output)
             print("\n✅ Combined contents copied to the clipboard.", file=sys.stderr)
+            # sys.co
+            # sys.
+            # os.command
         except (ImportError, pyperclip.PyperclipException) as e:
             print("\n❌ Error: Could not copy to clipboard.", file=sys.stderr)
             print("   'pyperclip' may not be installed or configured.", file=sys.stderr)
