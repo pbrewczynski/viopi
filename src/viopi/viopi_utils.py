@@ -14,7 +14,7 @@ import shutil
 
 LOCAL_IGNORE_FILES = (".copy_combine_ignore", ".viopi_ignore")
 GLOBAL_IGNORE_FILES = (
-    Path.home() / ".copy_combine_ignore_global",
+    # Path.home() / ".copy_combine_ignore_global",
     Path.home() / ".viopi_ignore_global",
 )
 PRESET_PREFIXES = (".copy_combine_ignore_preset_", ".viopi_ignore_preset_")
