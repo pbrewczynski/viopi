@@ -2,32 +2,18 @@
 #
 # viopi: A powerful tool for preparing project context for LLMs.
 #
-# This script is the main entry point for the 'viopi' command-line tool.
-# It recursively finds text files, concatenates their contents, and handles
-# output to a file, the clipboard, or stdout.
-#
-# It dynamically reads its version from the project's pyproject.toml.
-#
 
 import sys
 from pathlib import Path
-import importlib.metadata
-from . import viopi_utils
 
-# --- TOML Parsing (for development fallback) ---
-try:
-    import tomllib
-except ImportError:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        tomllib = None
+# --- Local Module Imports ---
+from . import viopi_utils
+from . import viopi_version
+from . import viopi_help
 
 # --- Constants ---
-# Base name for versioned output files
 OUTPUT_BASENAME = "_viopi_output"
 OUTPUT_EXTENSION = ".viopi"
-# Specific target for the --append flag
 APPEND_FILENAME = f"{OUTPUT_BASENAME}{OUTPUT_EXTENSION}"
 
 # --- Dependency Handling ---
@@ -37,82 +23,29 @@ except ImportError:
     print("Error: The 'viopi_utils.py' module was not found.", file=sys.stderr)
     print("Please make sure it's in the same directory or the package is installed correctly.", file=sys.stderr)
     sys.exit(1)
-    
 
-# --- Dynamic Version Loading ---
-def get_project_version() -> str:
-    """Retrieves the project version from package metadata or pyproject.toml."""
-    try:
-        return importlib.metadata.version("viopi")
-    except importlib.metadata.PackageNotFoundError:
-        if tomllib is None:
-            return "0.0.0-dev (tomli not found)"
-        try:
-            current_dir = Path(__file__).resolve().parent
-            while current_dir != current_dir.parent:
-                pyproject_path = current_dir / 'pyproject.toml'
-                if pyproject_path.exists():
-                    with open(pyproject_path, "rb") as f:
-                        data = tomllib.load(f)
-                    return data.get("project", {}).get("version", "0.0.0-dev (version missing)")
-                current_dir = current_dir.parent
-            return "0.0.0-dev (pyproject.toml not found)"
-        except Exception:
-            return "0.0.0-dev (pyproject parse error)"
-
-__version__ = get_project_version()
-
-
-
+# --- Git Repository Detection ---
+def find_git_root(start_path: Path) -> Path | None:
+    """
+    Finds the root of a Git repository by traversing up from start_path.
+    Returns the repository's root path or None if not in a Git repo.
+    """
+    current_path = start_path.resolve()
+    while True:
+        if (current_path / '.git').is_dir():
+            return current_path
+        if current_path.parent == current_path:
+            return None
+        current_path = current_path.parent
 
 def get_next_output_filename(basename: str, extension: str) -> str:
-    """
-    Finds the next available versioned filename.
-    Checks for `basename_1.ext`, `basename_2.ext`, etc.
-    """
+    """Finds the next available versioned filename."""
     counter = 1
     while True:
         versioned_path = Path(f"{basename}_{counter}{extension}")
         if not versioned_path.exists():
             return str(versioned_path)
         counter += 1
-
-def print_help():
-    """Prints the detailed help and usage message."""
-    help_text = f"""
-viopi v{__version__}
-A tool for preparing project context for LLMs by concatenating files.
-
-Usage:
-  viopi [options] [path] [pattern_1] [pattern_2] ...
-
-Default Behavior:
-  Creates a new, versioned output file on each run (e.g., `{OUTPUT_BASENAME}_1.viopi`, 
-  `{OUTPUT_BASENAME}_2.viopi`, etc.) to prevent accidental overwrites.
-
-Options:
-  -h, --help            Show this help message and exit.
-  -v, --version         Show the version number and exit.
-  
-  --stdout              Print output to stdout instead of a file.
-  --copy                Copy output to the system clipboard.
-  
-  --append              Appends output to the base file `{APPEND_FILENAME}`
-                        instead of creating a new versioned file.
-                        
-  --no-follow-links     Disable following symbolic links.
-
-Examples:
-  # Process current directory, save to a new versioned file (e.g., _viopi_output_1.viopi)
-  viopi
-
-  # Append JS file contexts to the base _viopi_output.viopi file
-  viopi --append src/app/ '**/*.js'
-
-  # Pipe context to another tool
-  viopi --stdout | llm -s "Summarize this"
-"""
-    print(help_text)
 
 def print_output_stats(output_string: str):
     """Calculates and prints output statistics."""
@@ -124,12 +57,15 @@ def main():
     """Parses arguments, calls the core logic, and handles the final output."""
     args = sys.argv[1:]
 
+    # --- Handle Help and Version Arguments First ---
     if "--help" in args or "-h" in args:
-        print_help()
-        sys.exit(0)
+        version_str = viopi_version.get_project_version()
+        viopi_help.print_help_and_exit(
+            version=version_str, basename=OUTPUT_BASENAME,
+            extension=OUTPUT_EXTENSION, append_filename=APPEND_FILENAME
+        )
     if "--version" in args or "-v" in args:
-        print(f"viopi version {__version__}")
-        sys.exit(0)
+        viopi_version.print_version_and_exit()
 
     # --- Determine Operational Mode ---
     stdout_mode = "--stdout" in args
@@ -150,15 +86,28 @@ def main():
     if len(path_args) > 1:
         print(f"⚠️  Warning: Multiple directory paths provided. Using the first one: '{path_args[0]}'", file=sys.stderr)
 
-    root_dir = Path(path_args[0]).resolve() if path_args else Path.cwd().resolve()
+    # --- Define Scopes for Scanning and Ignore Rules ---
+    scan_dir = Path(path_args[0]).resolve() if path_args else Path.cwd().resolve()
+    git_root = find_git_root(scan_dir)
+
+    if git_root:
+        # If in a git repo, use git root as the ceiling for finding .viopi_ignore files
+        ignore_search_root = git_root
+        print(f"✅ Git repository detected. Ignore rules will be loaded up to: {git_root}", file=sys.stderr)
+    else:
+        # Otherwise, the scan directory is its own root for ignores
+        ignore_search_root = scan_dir
 
     # --- Run Core Logic ---
-    print(f"🚀 Processing directory: {root_dir}", file=sys.stderr)
+    print(f"🚀 Processing directory: {scan_dir}", file=sys.stderr)
     link_status = "enabled" if follow_links_mode else "disabled"
     print(f"ℹ️  Symbolic link following is {link_status}.", file=sys.stderr)
 
-    final_output, summary_report = generate_project_context(
-        root_dir, pattern_args, follow_links=follow_links_mode
+    final_output, summary_report = viopi_utils.generate_project_context(
+        scan_dir=scan_dir,
+        ignore_search_root=ignore_search_root,
+        custom_patterns=pattern_args,
+        follow_links=follow_links_mode
     )
     print(summary_report, file=sys.stderr)
 
@@ -175,8 +124,6 @@ def main():
             print("\n❌ Error: Could not copy to clipboard. 'pyperclip' may not be installed.", file=sys.stderr)
             sys.exit(1)
     elif append_mode:
-        # --- APPEND LOGIC ---
-        # This block only runs if --append is used. It targets the base file.
         try:
             append_target = Path(APPEND_FILENAME)
             content_to_write = f"\n{final_output}" if append_target.exists() and append_target.stat().st_size > 0 else final_output
@@ -187,8 +134,6 @@ def main():
             print(f"\n❌ Error: Could not append to file '{APPEND_FILENAME}'.\n   Details: {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        # --- DEFAULT VERSIONED FILE LOGIC ---
-        # This is now the default. It *always* creates a new file.
         try:
             output_filename = get_next_output_filename(OUTPUT_BASENAME, OUTPUT_EXTENSION)
             with open(output_filename, "w", encoding="utf-8") as f:
@@ -198,7 +143,6 @@ def main():
             print(f"\n❌ Error: Could not write to file '{output_filename}'.\n   Details: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Print stats for any mode that produced content (i.e., not an error exit)
     print_output_stats(final_output)
 
 if __name__ == "__main__":
