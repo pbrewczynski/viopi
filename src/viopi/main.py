@@ -1,227 +1,149 @@
-# viopi_utils.py
-# Shared utilities and core logic for the Viopi project context generator.
+#!/usr/bin/env python3
+#
+# viopi: A powerful tool for preparing project context for LLMs.
+#
 
-import os
 import sys
-import fnmatch
 from pathlib import Path
-import subprocess
-import magic
-import shutil
 
-# --- Configuration (unchanged) ---
-LOCAL_IGNORE_FILES = (".copy_combine_ignore", ".viopi_ignore")
-GLOBAL_IGNORE_FILES = (
-    Path.home() / ".viopi_ignore_global",
-)
-PRESET_PREFIXES = (".copy_combine_ignore_preset_", ".viopi_ignore_preset_")
-PRESET_ALIASES = {
-    ".xcode_project": ".xcode_strict",
-    ".macos_app": ".xcode_strict",
-    ".ios_app": ".xcode_strict",
-    ".visionos_app": ".xcode_strict",
-    ".watchos_app": ".xcode_strict",
-    ".react_app": ".node_project",
-    ".vue_app": ".node_project",
-    ".svelte_app": ".node_project",
-    ".nextjs_app": ".node_project",
-}
+# --- Local Module Imports ---
+from . import viopi_utils
+from . import viopi_version
+from . import viopi_help
 
+# --- Constants ---
+OUTPUT_BASENAME = "_viopi_output"
+OUTPUT_EXTENSION = ".viopi"
+APPEND_FILENAME = f"{OUTPUT_BASENAME}{OUTPUT_EXTENSION}"
 
-# --- Helper Functions (unchanged) ---
-def is_binary(file_path: Path) -> bool:
-    """
-    Uses python-magic to determine if a file is binary. Resolves symlinks
-    to check the actual file content.
-    """
-    try:
-        real_path = file_path.resolve(strict=True)
-        if not real_path.is_file() or real_path.stat().st_size == 0:
-            return False
-    except (FileNotFoundError, RuntimeError):
-        return False
+# --- Dependency Handling ---
+try:
+    from .viopi_utils import generate_project_context
+except ImportError:
+    print("Error: The 'viopi_utils.py' module was not found.", file=sys.stderr)
+    print("Please make sure it's in the same directory or the package is installed correctly.", file=sys.stderr)
+    sys.exit(1)
 
-    KNOWN_TEXT_MIMES = {
-        'application/json', 'application/javascript', 'application/xml',
-        'application/x-sh', 'application/x-python', 'application/x-sql',
-        'application/vnd.apple.xcode-strings'
-    }
-    try:
-        mime_type = magic.from_file(str(real_path), mime=True)
-        if mime_type.startswith("text/") or mime_type in KNOWN_TEXT_MIMES:
-            return False
-        if mime_type in ['application/octet-stream', 'inode/x-empty']:
-            pass
-        else:
-            return True
-    except magic.MagicException:
-        pass
-    try:
-        with open(real_path, "r", encoding="utf-8") as f:
-            f.read(1024)
-        return False
-    except (UnicodeDecodeError, IOError):
-        return True
+# --- Git Repository Detection ---
+def find_git_root(start_path: Path) -> Path | None:
+    """
+    Finds the root of a Git repository by traversing up from start_path.
+    Returns the repository's root path or None if not in a Git repo.
+    """
+    current_path = start_path.resolve()
+    while True:
+        if (current_path / '.git').is_dir():
+            return current_path
+        if current_path.parent == current_path:
+            return None
+        current_path = current_path.parent
 
-def get_preset_patterns(preset_name: str) -> list[str]:
-    """
-    Loads ignore patterns from a preset file in the home directory.
-    """
-    preset_filename_suffix = preset_name.lstrip('.')
-    for prefix in PRESET_PREFIXES:
-        preset_file = Path.home() / f"{prefix}{preset_filename_suffix}"
-        if preset_file.is_file():
-            print(f"  (Loading from {preset_file.name})", file=sys.stderr)
-            return [
-                line for line in preset_file.read_text().splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            ]
-    return []
+def get_next_output_filename(basename: str, extension: str) -> str:
+    """Finds the next available versioned filename."""
+    counter = 1
+    while True:
+        versioned_path = Path(f"{basename}_{counter}{extension}")
+        if not versioned_path.exists():
+            return str(versioned_path)
+        counter += 1
 
-# --- Core Logic Function ---
-def generate_project_context(
-    processing_root: Path, # The root for the entire operation (e.g., git root)
-    custom_patterns: list[str],
-    follow_links: bool
-) -> tuple[str, str]:
-    """
-    Walks a directory, finds text files respecting a cascade of .viopi_ignore
-    files, generates a project context string, and returns it with a summary.
-    """
-    status_lines = []
+def print_output_stats(output_string: str):
+    """Calculates and prints output statistics."""
+    lines = len(output_string.splitlines())
+    chars = len(output_string)
+    print(f"📊 Stats: {lines:,} lines, {chars:,} characters.", file=sys.stderr)
+
+def main():
+    """Parses arguments, calls the core logic, and handles the final output."""
+    args = sys.argv[1:]
+
+    # --- Handle Help and Version Arguments First ---
+    if "--help" in args or "-h" in args:
+        # Delegate to the help module
+        version_str = viopi_version.get_project_version()
+        viopi_help.print_help_and_exit(
+            version=version_str,
+            basename=OUTPUT_BASENAME,
+            extension=OUTPUT_EXTENSION,
+            append_filename=APPEND_FILENAME
+        )
+    if "--version" in args or "-v" in args:
+        # Delegate to the version module
+        viopi_version.print_version_and_exit()
+
+    # --- Determine Operational Mode ---
+    stdout_mode = "--stdout" in args
+    copy_mode = "--copy" in args
+    append_mode = "--append" in args
+    follow_links_mode = "--no-follow-links" not in args
     
-    # 1. --- Aggregate Base Ignore Patterns ---
-    # These patterns are the foundation and apply everywhere.
-    base_patterns = {
-        ".DS_Store", ".git", *LOCAL_IGNORE_FILES, Path(__file__).name,
-        "viopi", "_viopi_output*.viopi"
-    }
-    sources_of_ignores = {"Defaults": list(base_patterns)}
+    args = [arg for arg in args if not arg.startswith('--')]
 
-    for ignore_file in GLOBAL_IGNORE_FILES:
-        if ignore_file.is_file():
-            patterns = [p for p in ignore_file.read_text().splitlines() if p.strip() and not p.strip().startswith("#")]
-            if patterns:
-                sources_of_ignores[ignore_file.name] = patterns
-                base_patterns.update(patterns)
-
-    activated_presets = set()
-    literal_args = []
-    for arg in custom_patterns:
-        preset_to_check = PRESET_ALIASES.get(arg, arg)
-        patterns = get_preset_patterns(preset_to_check)
-        if patterns:
-            activated_presets.add(arg)
-            sources_of_ignores[f"Preset: {arg}"] = patterns
-            base_patterns.update(patterns)
+    # --- Separate Path from Patterns ---
+    path_args, pattern_args = [], []
+    for arg in args:
+        if Path(arg).is_dir():
+            path_args.append(arg)
         else:
-            literal_args.append(arg)
+            pattern_args.append(arg)
+
+    if len(path_args) > 1:
+        print(f"⚠️  Warning: Multiple directory paths provided. Using the first one: '{path_args[0]}'", file=sys.stderr)
+
+    start_dir = Path(path_args[0]).resolve() if path_args else Path.cwd().resolve()
     
-    if literal_args:
-        sources_of_ignores["Arguments"] = literal_args
-        base_patterns.update(literal_args)
+    # --- Set Processing Root (GIT-AWARE) ---
+    processing_root = start_dir
+    git_root = find_git_root(start_dir)
+    if git_root:
+        print(f"✅ Git repository detected. Scanning from root: {git_root}", file=sys.stderr)
+        processing_root = git_root
 
-    # 2. --- Cascading Ignore Logic and File Collection ---
-    files_to_cat = []
-    ignore_patterns_cache = {}  # Cache for memoizing patterns for each directory
+    # --- Run Core Logic ---
+    print(f"🚀 Processing from: {processing_root}", file=sys.stderr)
+    link_status = "enabled" if follow_links_mode else "disabled"
+    print(f"ℹ️  Symbolic link following is {link_status}.", file=sys.stderr)
 
-    def _load_and_get_patterns_for_path(path: Path) -> set:
-        """
-        Recursively loads ignore files from parent directories and caches the results.
-        Patterns from closer .viopi_ignore files are added to the parent's patterns.
-        """
-        if path in ignore_patterns_cache:
-            return ignore_patterns_cache[path]
+    final_output, summary_report = viopi_utils.generate_project_context(
+        processing_root,
+        pattern_args,
+        follow_links=follow_links_mode
+    )
+    print(summary_report, file=sys.stderr)
 
-        if path == processing_root:
-            parent_patterns = base_patterns
-        else:
-            parent_patterns = _load_and_get_patterns_for_path(path.parent)
-
-        current_patterns = set(parent_patterns)
-        for fname in LOCAL_IGNORE_FILES:
-            local_ignore_file = path / fname
-            if local_ignore_file.is_file():
-                try:
-                    new_patterns = {p for p in local_ignore_file.read_text().splitlines() if p.strip() and not p.strip().startswith("#")}
-                    if new_patterns:
-                        current_patterns.update(new_patterns)
-                        source_key = f"Local: {local_ignore_file.relative_to(processing_root)}"
-                        if source_key not in sources_of_ignores:
-                             sources_of_ignores[source_key] = sorted(list(new_patterns))
-                except Exception:
-                    pass
-        
-        ignore_patterns_cache[path] = current_patterns
-        return current_patterns
-
-    for root, dirs, files in os.walk(processing_root, topdown=True, followlinks=follow_links):
-        current_path = Path(root)
-        active_patterns = _load_and_get_patterns_for_path(current_path)
-
-        dirs[:] = [d for d in dirs if not any(
-            fnmatch.fnmatch(d, p) or fnmatch.fnmatch(str((current_path / d).relative_to(processing_root)), p)
-            for p in active_patterns
-        )]
-        
-        for filename in files:
-            file_path = current_path / filename
-            if not follow_links and file_path.is_symlink():
-                continue
-
-            rel_path_str = str(file_path.relative_to(processing_root))
-            if any(fnmatch.fnmatch(filename, p) or fnmatch.fnmatch(rel_path_str, p) for p in active_patterns):
-                continue
-            
-            if is_binary(file_path):
-                continue
-                
-            files_to_cat.append(file_path)
-
-    # 3. --- Build Final Output ---
-    status_lines.append("🔎 Activating ignore patterns from the following sources:")
-    for source, patterns in sorted(sources_of_ignores.items()):
-        status_lines.append(f"  - {source} ({len(patterns)} patterns)")
-    status_lines.append("----------------------------------------")
-    
-    output_parts = [f"Processing Root: {processing_root}\n"]
-    
-    try:
-        if shutil.which("tree"):
-            all_patterns = set().union(*sources_of_ignores.values())
-            tree_cmd = ["tree"] + [arg for p in sorted(list(all_patterns)) for arg in ["-I", p]]
-            if follow_links:
-                tree_cmd.append("-l")
-            tree_output = "Directory tree (ignoring specified patterns):\n"
-            tree_output += subprocess.check_output(tree_cmd, cwd=processing_root, text=True, stderr=subprocess.DEVNULL)
-        else:
-            tree_output = "Directory tree: ('tree' command not found, skipping)"
-    except Exception as e:
-        tree_output = f"Directory tree: (failed to generate: {e})"
-        
-    output_parts.append(tree_output)
-    output_parts.append("\n\n---\nCombined file contents:\n")
-
-    if not files_to_cat:
-        output_parts.append("No text files found to copy after applying ignore patterns.")
+    # --- Handle Final Output ---
+    if stdout_mode:
+        print(final_output)
+        print(f"\n✅ Done. Output sent to stdout.", file=sys.stderr)
+    elif copy_mode:
+        try:
+            import pyperclip
+            pyperclip.copy(final_output)
+            print(f"\n✅ Combined contents copied to the clipboard.", file=sys.stderr)
+        except (ImportError, pyperclip.PyperclipException):
+            print("\n❌ Error: Could not copy to clipboard. 'pyperclip' may not be installed.", file=sys.stderr)
+            sys.exit(1)
+    elif append_mode:
+        try:
+            append_target = Path(APPEND_FILENAME)
+            content_to_write = f"\n{final_output}" if append_target.exists() and append_target.stat().st_size > 0 else final_output
+            with open(append_target, "a", encoding="utf-8") as f:
+                f.write(content_to_write)
+            print(f"\n✅ Combined contents Appended to file: {append_target.resolve()}", file=sys.stderr)
+        except IOError as e:
+            print(f"\n❌ Error: Could not append to file '{APPEND_FILENAME}'.\n   Details: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
-        for file_path in sorted(files_to_cat):
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                    output_parts.append(f"\n--- FILE: {file_path.relative_to(processing_root)} ---\n")
-                    output_parts.append(content)
-            except Exception as e:
-                output_parts.append(f"\n--- ERROR: Could not read {file_path.relative_to(processing_root)}: {e} ---\n")
-    
-    summary_lines = []
-    if activated_presets:
-        summary_lines.append("Activated presets:")
-        for preset in sorted(list(activated_presets)):
-            summary_lines.append(f"  - {preset}")
+        try:
+            output_filename = get_next_output_filename(OUTPUT_BASENAME, OUTPUT_EXTENSION)
+            with open(output_filename, "w", encoding="utf-8") as f:
+                f.write(final_output)
+            print(f"\n✅ Combined contents Saved to new file: {Path(output_filename).resolve()}", file=sys.stderr)
+        except IOError as e:
+            print(f"\n❌ Error: Could not write to file '{output_filename}'.\n   Details: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    final_output = "".join(output_parts)
-    status_report = "\n".join(status_lines)
-    summary_report = "\n".join(summary_lines)
-    
-    return final_output, f"{status_report}\n{summary_report}"
+    print_output_stats(final_output)
+
+if __name__ == "__main__":
+    main()
