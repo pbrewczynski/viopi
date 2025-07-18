@@ -9,6 +9,7 @@ name = "viopi"
 version = "0.5.0"
 dependencies = [
     "python-magic",
+    "pyperclip>=1.8.2",
 ]
 description = "Saves command output and shows statistics on it."
 requires-python = ">=3.8"
