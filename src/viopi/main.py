@@ -59,16 +59,12 @@ def main():
 
     # --- Handle Help and Version Arguments First ---
     if "--help" in args or "-h" in args:
-        # Delegate to the help module
         version_str = viopi_version.get_project_version()
         viopi_help.print_help_and_exit(
-            version=version_str,
-            basename=OUTPUT_BASENAME,
-            extension=OUTPUT_EXTENSION,
-            append_filename=APPEND_FILENAME
+            version=version_str, basename=OUTPUT_BASENAME,
+            extension=OUTPUT_EXTENSION, append_filename=APPEND_FILENAME
         )
     if "--version" in args or "-v" in args:
-        # Delegate to the version module
         viopi_version.print_version_and_exit()
 
     # --- Determine Operational Mode ---
@@ -90,23 +86,27 @@ def main():
     if len(path_args) > 1:
         print(f"⚠️  Warning: Multiple directory paths provided. Using the first one: '{path_args[0]}'", file=sys.stderr)
 
-    start_dir = Path(path_args[0]).resolve() if path_args else Path.cwd().resolve()
-    
-    # --- Set Processing Root (GIT-AWARE) ---
-    processing_root = start_dir
-    git_root = find_git_root(start_dir)
+    # --- Define Scopes for Scanning and Ignore Rules ---
+    scan_dir = Path(path_args[0]).resolve() if path_args else Path.cwd().resolve()
+    git_root = find_git_root(scan_dir)
+
     if git_root:
-        print(f"✅ Git repository detected. Scanning from root: {git_root}", file=sys.stderr)
-        processing_root = git_root
+        # If in a git repo, use git root as the ceiling for finding .viopi_ignore files
+        ignore_search_root = git_root
+        print(f"✅ Git repository detected. Ignore rules will be loaded up to: {git_root}", file=sys.stderr)
+    else:
+        # Otherwise, the scan directory is its own root for ignores
+        ignore_search_root = scan_dir
 
     # --- Run Core Logic ---
-    print(f"🚀 Processing from: {processing_root}", file=sys.stderr)
+    print(f"🚀 Processing directory: {scan_dir}", file=sys.stderr)
     link_status = "enabled" if follow_links_mode else "disabled"
     print(f"ℹ️  Symbolic link following is {link_status}.", file=sys.stderr)
 
     final_output, summary_report = viopi_utils.generate_project_context(
-        processing_root,
-        pattern_args,
+        scan_dir=scan_dir,
+        ignore_search_root=ignore_search_root,
+        custom_patterns=pattern_args,
         follow_links=follow_links_mode
     )
     print(summary_report, file=sys.stderr)

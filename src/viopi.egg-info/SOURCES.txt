@@ -1,7 +1,9 @@
 pyproject.toml
 src/viopi/__init__.py
 src/viopi/main.py
+src/viopi/viopi_help.py
 src/viopi/viopi_utils.py
+src/viopi/viopi_version.py
 src/viopi.egg-info/PKG-INFO
 src/viopi.egg-info/SOURCES.txt
 src/viopi.egg-info/dependency_links.txt
