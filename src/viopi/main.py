@@ -1,149 +1,128 @@
-#!/usr/bin/env python3
-#
-# viopi: A powerful tool for preparing project context for LLMs.
-#
-
-import sys
-from pathlib import Path
-
-# --- Local Module Imports ---
-from . import viopi_utils
-from . import viopi_version
-from . import viopi_help
-
-# --- Constants ---
-OUTPUT_BASENAME = "_viopi_output"
-OUTPUT_EXTENSION = ".viopi"
-APPEND_FILENAME = f"{OUTPUT_BASENAME}{OUTPUT_EXTENSION}"
-
-# --- Dependency Handling ---
-try:
-    from .viopi_utils import generate_project_context
-except ImportError:
-    print("Error: The 'viopi_utils.py' module was not found.", file=sys.stderr)
-    print("Please make sure it's in the same directory or the package is installed correctly.", file=sys.stderr)
-    sys.exit(1)
-
-# --- Git Repository Detection ---
-def find_git_root(start_path: Path) -> Path | None:
-    """
-    Finds the root of a Git repository by traversing up from start_path.
-    Returns the repository's root path or None if not in a Git repo.
-    """
-    current_path = start_path.resolve()
-    while True:
-        if (current_path / '.git').is_dir():
-            return current_path
-        if current_path.parent == current_path:
-            return None
-        current_path = current_path.parent
-
-def get_next_output_filename(basename: str, extension: str) -> str:
-    """Finds the next available versioned filename."""
-    counter = 1
-    while True:
-        versioned_path = Path(f"{basename}_{counter}{extension}")
-        if not versioned_path.exists():
-            return str(versioned_path)
-        counter += 1
-
-def print_output_stats(output_string: str):
-    """Calculates and prints output statistics."""
-    lines = len(output_string.splitlines())
-    chars = len(output_string)
-    print(f"📊 Stats: {lines:,} lines, {chars:,} characters.", file=sys.stderr)
-
-def main():
-    """Parses arguments, calls the core logic, and handles the final output."""
-    args = sys.argv[1:]
-
-    # --- Handle Help and Version Arguments First ---
-    if "--help" in args or "-h" in args:
-        version_str = viopi_version.get_project_version()
-        viopi_help.print_help_and_exit(
-            version=version_str, basename=OUTPUT_BASENAME,
-            extension=OUTPUT_EXTENSION, append_filename=APPEND_FILENAME
-        )
-    if "--version" in args or "-v" in args:
-        viopi_version.print_version_and_exit()
-
-    # --- Determine Operational Mode ---
-    stdout_mode = "--stdout" in args
-    copy_mode = "--copy" in args
-    append_mode = "--append" in args
-    follow_links_mode = "--no-follow-links" not in args
-    
-    args = [arg for arg in args if not arg.startswith('--')]
-
-    # --- Separate Path from Patterns ---
-    path_args, pattern_args = [], []
-    for arg in args:
-        if Path(arg).is_dir():
-            path_args.append(arg)
-        else:
-            pattern_args.append(arg)
-
-    if len(path_args) > 1:
-        print(f"⚠️  Warning: Multiple directory paths provided. Using the first one: '{path_args[0]}'", file=sys.stderr)
-
-    # --- Define Scopes for Scanning and Ignore Rules ---
-    scan_dir = Path(path_args[0]).resolve() if path_args else Path.cwd().resolve()
-    git_root = find_git_root(scan_dir)
-
-    if git_root:
-        # If in a git repo, use git root as the ceiling for finding .viopi_ignore files
-        ignore_search_root = git_root
-        print(f"✅ Git repository detected. Ignore rules will be loaded up to: {git_root}", file=sys.stderr)
-    else:
-        # Otherwise, the scan directory is its own root for ignores
-        ignore_search_root = scan_dir
-
-    # --- Run Core Logic ---
-    print(f"🚀 Processing directory: {scan_dir}", file=sys.stderr)
-    link_status = "enabled" if follow_links_mode else "disabled"
-    print(f"ℹ️  Symbolic link following is {link_status}.", file=sys.stderr)
-
-    final_output, summary_report = viopi_utils.generate_project_context(
-        scan_dir=scan_dir,
-        ignore_search_root=ignore_search_root,
-        custom_patterns=pattern_args,
-        follow_links=follow_links_mode
-    )
-    print(summary_report, file=sys.stderr)
-
-    # --- Handle Final Output ---
-    if stdout_mode:
-        print(final_output)
-        print(f"\n✅ Done. Output sent to stdout.", file=sys.stderr)
-    elif copy_mode:
-        try:
-            import pyperclip
-            pyperclip.copy(final_output)
-            print(f"\n✅ Combined contents copied to the clipboard.", file=sys.stderr)
-        except (ImportError, pyperclip.PyperclipException):
-            print("\n❌ Error: Could not copy to clipboard. 'pyperclip' may not be installed.", file=sys.stderr)
-            sys.exit(1)
-    elif append_mode:
-        try:
-            append_target = Path(APPEND_FILENAME)
-            content_to_write = f"\n{final_output}" if append_target.exists() and append_target.stat().st_size > 0 else final_output
-            with open(append_target, "a", encoding="utf-8") as f:
-                f.write(content_to_write)
-            print(f"\n✅ Combined contents Appended to file: {append_target.resolve()}", file=sys.stderr)
-        except IOError as e:
-            print(f"\n❌ Error: Could not append to file '{APPEND_FILENAME}'.\n   Details: {e}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        try:
-            output_filename = get_next_output_filename(OUTPUT_BASENAME, OUTPUT_EXTENSION)
-            with open(output_filename, "w", encoding="utf-8") as f:
-                f.write(final_output)
-            print(f"\n✅ Combined contents Saved to new file: {Path(output_filename).resolve()}", file=sys.stderr)
-        except IOError as e:
-            print(f"\n❌ Error: Could not write to file '{output_filename}'.\n   Details: {e}", file=sys.stderr)
-            sys.exit(1)
-
-    print_output_stats(final_output)
-
-if __name__ == "__main__":
-    main()
+import argparse                                                                                                         
+import json                                                                                                             
+import os                                                                                                               
+import sys                                                                                                              
+from datetime import datetime                                                                                           
+                                                                                                                        
+# Assuming these modules exist based on SOURCES.txt                                                                     
+from . import viopi_utils                                                                                               
+from .viopi_help import HELP_MESSAGE                                                                                    
+from .viopi_version import VIOPION_VERSION                                                                              
+                                                                                                                        
+def main():                                                                                                             
+    """Main function to run the viopi tool."""                                                                          
+    parser = argparse.ArgumentParser(                                                                                   
+        description="Viopi: View I/O and Project Info.",                                                                
+        add_help=False # Custom help message                                                                            
+    )                                                                                                                   
+    parser.add_argument(                                                                                                
+        "path",                                                                                                         
+        nargs="?",                                                                                                      
+        default=".",                                                                                                    
+        help="Directory path to process. Defaults to the current directory."                                            
+    )                                                                                                                   
+    parser.add_argument(                                                                                                
+        "-h", "--help",                                                                                                 
+        action="store_true",                                                                                            
+        help="Show this help message and exit."                                                                         
+    )                                                                                                                   
+    parser.add_argument(                                                                                                
+        "--stdout",                                                                                                     
+        action="store_true",                                                                                            
+        help="Print the output to stdout instead of copying to clipboard."                                              
+    )                                                                                                                   
+    parser.add_argument(                                                                                                
+        "--json",                                                                                                       
+        action="store_true",                                                                                            
+        help="Output the data in JSON format."                                                                          
+    )                                                                                                                   
+    parser.add_argument(                                                                                                
+        "-v", "--version",                                                                                              
+        action="store_true",                                                                                            
+        help="Show program's version number and exit."                                                                  
+    )                                                                                                                   
+                                                                                                                        
+    args = parser.parse_args()                                                                                          
+                                                                                                                        
+    if args.help:                                                                                                       
+        print(HELP_MESSAGE)                                                                                             
+        sys.exit(0)                                                                                                     
+                                                                                                                        
+    if args.version:                                                                                                    
+        print(f"viopi version {VIOPION_VERSION}")                                                                       
+        sys.exit(0)                                                                                                     
+                                                                                                                        
+    target_dir = os.path.abspath(args.path)                                                                             
+                                                                                                                        
+    if not os.path.isdir(target_dir):                                                                                   
+        print(f"Error: Directory not found at '{target_dir}'")                                                          
+        sys.exit(1)                                                                                                     
+                                                                                                                        
+    # --- Data Collection ---                                                                                           
+    files_to_process = viopi_utils.get_file_list(target_dir)                                                            
+                                                                                                                        
+    file_data_list = []                                                                                                 
+    stats = {                                                                                                           
+        "total_files": 0,                                                                                               
+        "total_lines": 0,                                                                                               
+        "total_characters": 0                                                                                           
+    }                                                                                                                   
+                                                                                                                        
+    for file_path in files_to_process:                                                                                  
+        try:                                                                                                            
+            with open(file_path, 'r', encoding='utf-8') as f:                                                           
+                content = f.read()                                                                                      
+                                                                                                                        
+            relative_path = os.path.relpath(file_path, target_dir)                                                      
+                                                                                                                        
+            # Update stats                                                                                              
+            stats["total_files"] += 1                                                                                   
+            stats["total_lines"] += len(content.splitlines())                                                           
+            stats["total_characters"] += len(content)                                                                   
+                                                                                                                        
+            # Add to file data list                                                                                     
+            file_data_list.append({                                                                                     
+                "path": relative_path,                                                                                  
+                "content": content                                                                                      
+            })                                                                                                          
+                                                                                                                        
+        except (IOError, UnicodeDecodeError) as e:                                                                      
+            print(f"Warning: Could not read file {file_path}: {e}", file=sys.stderr)                                    
+            continue                                                                                                    
+                                                                                                                        
+    # --- Output Generation ---                                                                                         
+    if args.json:                                                                                                       
+        # JSON Output Mode                                                                                              
+        output_data = {                                                                                                 
+            "stats": stats,                                                                                             
+            "files": file_data_list                                                                                     
+        }                                                                                                               
+        # Use indent for pretty-printing the JSON                                                                       
+        output_string = json.dumps(output_data, indent=2)                                                               
+    else:                                                                                                               
+        # Original Text Output Mode                                                                                     
+        header = f"Directory Processed: {target_dir}\n"                                                                 
+        tree_output = viopi_utils.generate_tree_output(target_dir, files_to_process)                                    
+                                                                                                                        
+        file_contents_str = "\n\n---\nCombined file contents:\n"                                                        
+        for file_data in file_data_list:                                                                                
+            file_contents_str += f"\n--- FILE: {file_data['path']} ---\n{file_data['content']}"                         
+                                                                                                                        
+        output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"                         
+                                                                                                                        
+    # --- Final Output Handling ---                                                                                     
+    if args.stdout or args.json:                                                                                        
+        print(output_string)                                                                                            
+    else:                                                                                                               
+        try:                                                                                                            
+            import pyperclip                                                                                            
+            pyperclip.copy(output_string)                                                                               
+            print("Viopi output copied to clipboard.")                                                                  
+            print(f"Stats: {stats['total_files']} files, {stats['total_lines']} lines, {stats['total_characters']} characters.")                                                                                                           
+        except pyperclip.PyperclipException as e:                                                                       
+            print(f"Error: Could not copy to clipboard. Please install xclip or xsel on Linux, or use the --stdout flag.")                                                                                                                      
+            print(f"Pyperclip error: {e}")                                                                              
+            sys.exit(1)                                                                                                 
+                                                                                                                        
+if __name__ == "__main__":                                                                                              
+    main()                              
