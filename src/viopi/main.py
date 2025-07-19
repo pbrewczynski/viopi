@@ -42,6 +42,8 @@ def main():
     output_group.add_argument("--append", action="store_true")
     output_group.add_argument("--json", action="store_true")
     parser.add_argument("--no-follow-links", action="store_true")
+    parser.add_argument("--show-ignore", action="store_true",
+    help="Print the combined .viopi_ignore patterns (with sources) and exit.")
 
     args = parser.parse_args()
     version = get_project_version()
@@ -66,7 +68,13 @@ def main():
 
     # --- 2. Data Collection (CORRECTED) ---
     # Get the ignore spec AND the root path to check against
+    if args.show_ignore:
+        _, _, annotated = viopi_ignorer.get_ignore_config(target_dir, return_annotated=True)
+        print(viopi_ignorer.format_combined_ignore(annotated))
+        sys.exit(0)
+
     ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
+    # ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
     follow_links = not args.no_follow_links
     
     # Pass both the spec and the root to the file lister
