@@ -20,7 +20,6 @@ OUTPUT_EXTENSION = ".viopi"
 APPEND_FILENAME = f"{OUTPUT_BASENAME}{OUTPUT_EXTENSION}"
 
 def get_next_versioned_filename(base: str, ext: str, directory: str) -> str:
-    # This function is fine as-is.
     version = 1
     while True:
         filename = Path(directory) / f"{base}_{version}{ext}"
@@ -34,7 +33,6 @@ def main():
         description="Viopi: A tool for preparing project context for LLMs.",
         add_help=False
     )
-    # Argument parsing is the same as the previous version
     parser.add_argument("path_and_patterns", nargs="*")
     parser.add_argument("-h", "--help", action="store_true")
     parser.add_argument("-v", "--version", action="store_true")
@@ -66,12 +64,14 @@ def main():
     if not os.path.isdir(target_dir):
         viopi_printer.print_error(f"Directory not found at '{target_dir}'")
 
-    # --- 2. Data Collection ---
-    ignore_spec = viopi_ignorer.get_ignore_spec(target_dir)
+    # --- 2. Data Collection (CORRECTED) ---
+    # Get the ignore spec AND the root path to check against
+    ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
     follow_links = not args.no_follow_links
     
+    # Pass both the spec and the root to the file lister
     files_to_process, ignored_count = viopi_utils.get_file_list(
-        target_dir, patterns, follow_links, ignore_spec
+        target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
 
     if not files_to_process:
@@ -91,26 +91,22 @@ def main():
         except IOError as e:
             viopi_printer.print_warning(f"Could not read file {file_path}: {e}")
 
-    # --- 3. Output Generation ---
+    # --- 3. Output Generation (No changes needed) ---
     if args.json:
-        # For JSON, we calculate payload size and add it before generating
         json_string = viopi_json_output.generate_json_output(stats, file_data_list)
         stats["payload_size_bytes"] = len(json_string.encode('utf-8'))
-        # Regenerate with final stat
         output_string = viopi_json_output.generate_json_output(stats, file_data_list)
         print(output_string)
     else:
-        # For text, generate the string first, then calculate its size
         header = f"Directory Processed: {target_dir}\n"
         tree_output = viopi_utils.generate_tree_output(target_dir, files_to_process)
         file_contents_str = "\n\n---\nCombined file contents:\n"
         for file_data in file_data_list:
             file_contents_str += f"\n--- FILE: {file_data['path']} ---\n{file_data['content']}"
         text_output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"
-        
         stats["payload_size_bytes"] = len(text_output_string.encode('utf-8'))
 
-        # --- 4. Final Output Handling (Delegated to printer) ---
+        # --- 4. Final Output Handling (No changes needed) ---
         if args.stdout:
             print(text_output_string)
         elif args.copy:
@@ -129,7 +125,7 @@ def main():
                 viopi_printer.print_success_append(stats, str(append_path))
             except IOError as e:
                 viopi_printer.print_error(f"Could not append to file {append_path}: {e}")
-        else: # Default: Create a new versioned file
+        else:
             output_filename = get_next_versioned_filename(OUTPUT_BASENAME, OUTPUT_EXTENSION, target_dir)
             try:
                 with open(output_filename, 'w', encoding='utf-8') as f:
