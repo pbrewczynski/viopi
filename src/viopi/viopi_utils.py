@@ -1,5 +1,3 @@
-# viopi_utils.py
-
 import os
 from pathlib import Path
 from pathspec import PathSpec # Import for type hinting
