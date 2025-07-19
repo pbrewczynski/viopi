@@ -1,25 +1,23 @@
-# pyproject.toml
-
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = [
+    "setuptools>=61.0",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "viopi"
-# Your version will be here, managed by bump-my-version
-version = "0.16.0" 
+version = "0.17.0"
 description = "A tool for preparing project context for LLMs by concatenating files."
 requires-python = ">=3.8"
-# This is the list pipx reads!
 dependencies = [
     "pyperclip",
-    "pathspec"  # <-- ADD THIS LINE
+    "pathspec",
 ]
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [project.scripts]
 viopi = "viopi.main:main"
 
-# Your bump-my-version config would be here too...
+[tool.setuptools.packages.find]
+where = [
+    "src",
+]

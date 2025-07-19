@@ -1,12 +1,7 @@
 Metadata-Version: 2.4
 Name: viopi
-Version: 0.15.0
-Summary: Saves command output and shows statistics on it.
-Classifier: Programming Language :: Python :: 3
-Classifier: Operating System :: OS Independent
-Classifier: Environment :: Console
-Classifier: Topic :: Utilities
+Version: 0.17.0
+Summary: A tool for preparing project context for LLMs by concatenating files.
 Requires-Python: >=3.8
-Requires-Dist: python-magic
-Requires-Dist: pyperclip>=1.8.2
+Requires-Dist: pyperclip
 Requires-Dist: pathspec
