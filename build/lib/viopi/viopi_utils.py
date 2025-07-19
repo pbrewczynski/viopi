@@ -218,3 +218,103 @@ def generate_project_context(
     summary_report = "\n".join(summary_lines)
     
     return final_output, f"{status_report}\n{summary_report}"
+
+    
+import os                                                                                                               
+import fnmatch                                                                                                          
+import magic # from python-magic                                                                                        
+                                                                                                                        
+def read_ignore_file(path):                                                                                             
+    """Reads a .gitignore-style file and returns a list of patterns."""                                                 
+    patterns = []                                                                                                       
+    if os.path.exists(path):                                                                                            
+        with open(path, 'r', encoding='utf-8') as f:                                                                    
+            for line in f:                                                                                              
+                line = line.strip()                                                                                     
+                if line and not line.startswith('#'):                                                                   
+                    patterns.append(line)                                                                               
+    return patterns                                                                                                     
+                                                                                                                        
+def is_binary(filepath):                                                                                                
+    """Check if a file is binary using python-magic."""                                                                 
+    try:                                                                                                                
+        mime_type = magic.from_file(filepath, mime=True)                                                                
+        return not mime_type.startswith('text/')                                                                        
+    except magic.MagicException:                                                                                        
+        # If magic fails, fall back to a simpler check                                                                  
+        try:                                                                                                            
+            with open(filepath, 'r', encoding='utf-8') as f:                                                            
+                f.read(1024) # Try to read some text                                                                    
+            return False                                                                                                
+        except UnicodeDecodeError:                                                                                      
+            return True                                                                                                 
+    return False                                                                                                        
+                                                                                                                        
+def get_file_list(root_dir):                                                                                            
+    """Walks a directory and returns a list of files to process."""                                                     
+    ignore_patterns = [                                                                                                 
+        '.git/',                                                                                                        
+        '*.pyc', '*.pyo', '*.pyd',                                                                                      
+        '__pycache__/', 'env/', 'venv/', '.eggs/',                                                                      
+        'build/', 'dist/', '*.egg-info/',                                                                               
+        '.output.viopi' # self-ignore                                                                                   
+    ]                                                                                                                   
+                                                                                                                        
+    gitignore_path = os.path.join(root_dir, '.gitignore')                                                               
+    ignore_patterns.extend(read_ignore_file(gitignore_path))                                                            
+                                                                                                                        
+    file_list = []                                                                                                      
+    for root, dirs, files in os.walk(root_dir, topdown=True):                                                           
+        # Filter directories in-place                                                                                   
+        dirs[:] = [                                                                                                     
+            d for d in dirs                                                                                             
+            if not any(fnmatch.fnmatch(os.path.join(os.path.relpath(root, root_dir), d) + '/', p) for p in              
+ignore_patterns)                                                                                                        
+        ]                                                                                                               
+                                                                                                                        
+        for filename in files:                                                                                          
+            filepath = os.path.join(root, filename)                                                                     
+            relative_path = os.path.relpath(filepath, root_dir)                                                         
+                                                                                                                        
+            if any(fnmatch.fnmatch(relative_path, p) for p in ignore_patterns):                                         
+                continue                                                                                                
+                                                                                                                        
+            if is_binary(filepath):                                                                                     
+                continue                                                                                                
+                                                                                                                        
+            file_list.append(filepath)                                                                                  
+                                                                                                                        
+    return sorted(file_list)                                                                                            
+                                                                                                                        
+def generate_tree_output(root_dir, file_list):                                                                          
+    """Generates a string representation of the directory tree."""                                                      
+    tree_str = "Directory tree (ignoring specified patterns):\n"                                                        
+    structure = {}                                                                                                      
+                                                                                                                        
+    for path in file_list:                                                                                              
+        relative_path = os.path.relpath(path, root_dir)                                                                 
+        parts = relative_path.split(os.sep)                                                                             
+        current_level = structure                                                                                       
+        for part in parts:                                                                                              
+            current_level = current_level.setdefault(part, {})                                                          
+                                                                                                                        
+    def build_tree_lines(d, prefix=""):                                                                                 
+        lines = []                                                                                                      
+        entries = sorted(d.keys())                                                                                      
+        for i, entry in enumerate(entries):                                                                             
+            connector = "├── " if i < len(entries) - 1 else "└── "                                                      
+            lines.append(f"{prefix}{connector}{entry}")                                                                 
+            if d[entry]:                                                                                                
+                extension = "│   " if i < len(entries) - 1 else "    "                                                  
+                lines.extend(build_tree_lines(d[entry], prefix=prefix + extension))                                     
+        return lines                                                                                                    
+                                                                                                                        
+    tree_str += ".\n"                                                                                                   
+    tree_str += "\n".join(build_tree_lines(structure))                                                                  
+                                                                                                                        
+    # Count directories from the generated tree structure                                                               
+    dir_count = str(tree_str).count('├── ') + str(tree_str).count('└── ') - len(file_list)                              
+    file_count = len(file_list)                                                                                         
+                                                                                                                        
+    tree_str += f"\n\n{dir_count} directories, {file_count} files"                                                      
+    return tree_str      

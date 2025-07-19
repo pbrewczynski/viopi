@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "viopi"
-version = "0.6.0"
+version = "0.8.0"
 dependencies = [
     "python-magic",
     "pyperclip>=1.8.2",

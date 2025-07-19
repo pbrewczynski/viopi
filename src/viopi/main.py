@@ -6,8 +6,8 @@ from datetime import datetime
                                                                                                                         
 # Assuming these modules exist based on SOURCES.txt                                                                     
 from . import viopi_utils                                                                                               
-from .viopi_help import HELP_MESSAGE                                                                                    
-from .viopi_version import VIOPION_VERSION                                                                              
+from .viopi_help import print_help_and_exit                                                                                    
+from .viopi_version import get_project_version, print_version_and_exit                                                                              
                                                                                                                         
 def main():                                                                                                             
     """Main function to run the viopi tool."""                                                                          
@@ -45,11 +45,12 @@ def main():
     args = parser.parse_args()                                                                                          
                                                                                                                         
     if args.help:                                                                                                       
-        print(HELP_MESSAGE)                                                                                             
+        print_help_and_exit()
         sys.exit(0)                                                                                                     
                                                                                                                         
     if args.version:                                                                                                    
-        print(f"viopi version {VIOPION_VERSION}")                                                                       
+        print_version_and_exit()
+        # print(f"viopi version {VIOPION_VERSION}")                                                                       
         sys.exit(0)                                                                                                     
                                                                                                                         
     target_dir = os.path.abspath(args.path)                                                                             
