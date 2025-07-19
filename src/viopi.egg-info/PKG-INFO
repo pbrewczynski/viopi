@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: viopi
-Version: 0.5.0
+Version: 0.6.0
 Summary: Saves command output and shows statistics on it.
 Classifier: Programming Language :: Python :: 3
 Classifier: Operating System :: OS Independent
@@ -8,3 +8,4 @@ Classifier: Environment :: Console
 Classifier: Topic :: Utilities
 Requires-Python: >=3.8
 Requires-Dist: python-magic
+Requires-Dist: pyperclip>=1.8.2
