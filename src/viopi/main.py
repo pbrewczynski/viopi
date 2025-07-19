@@ -4,11 +4,13 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Assuming these modules exist and are updated as needed
 from . import viopi_utils
 from .viopi_help import print_help_and_exit
 from .viopi_version import get_project_version, print_version_and_exit
+from . import viopi_json_output  # <-- Import the new module
 
 # --- Configuration Constants (from your help text) ---
 OUTPUT_BASENAME = "_viopi_output"
@@ -44,9 +46,11 @@ def main():
 
     # Mutually exclusive output options
     output_group = parser.add_mutually_exclusive_group()
-    output_group.add_argument("--stdout", action="store_true", help="Print output to stdout instead of a file.")
-    output_group.add_argument("--copy", action="store_true", help="Copy output to the system clipboard.")
-    output_group.add_argument("--append", action="store_true", help=f"Append output to the base file '{APPEND_FILENAME}'.")
+    output_group.add_argument("--stdout", action="store_true", help="Print formatted text output to stdout instead of a file.")
+    output_group.add_argument("--copy", action="store_true", help="Copy formatted text output to the system clipboard.")
+    output_group.add_argument("--append", action="store_true", help=f"Append formatted text output to the base file '{APPEND_FILENAME}'.")
+    # --- Add the --json argument to the group ---
+    output_group.add_argument("--json", action="store_true", help="Output the data in JSON format to stdout.")
 
     parser.add_argument("--no-follow-links", action="store_true", help="Disable following symbolic links.")
 
@@ -60,45 +64,33 @@ def main():
     if args.version:
         print_version_and_exit()
 
-    # --- Process Path and Patterns ---
+    # --- Process Path and Patterns (Code from previous step, no changes here) ---
     target_dir_str = "."
     patterns = []
     if args.path_and_patterns:
         first_arg = args.path_and_patterns[0]
-        # If the first argument is a directory, use it as the path
         if os.path.isdir(first_arg):
             target_dir_str = first_arg
             patterns = args.path_and_patterns[1:]
         else:
-            # Otherwise, the path is the default, and all args are patterns
             patterns = args.path_and_patterns
-
     target_dir = os.path.abspath(target_dir_str)
     if not os.path.isdir(target_dir):
         print(f"Error: Directory not found at '{target_dir}'", file=sys.stderr)
         sys.exit(1)
 
-    # --- Data Collection ---
+    # --- Data Collection (Code from previous step, no changes here) ---
     follow_links = not args.no_follow_links
-    # NOTE: viopi_utils.get_file_list must be updated to handle patterns and follow_links
     files_to_process = viopi_utils.get_file_list(target_dir, patterns, follow_links)
-
     if not files_to_process:
         print(f"No files found in '{target_dir}' matching the criteria. Exiting.", file=sys.stderr)
         sys.exit(0)
-
-    stats = {
-        "total_files": 0,
-        "total_lines": 0,
-        "total_characters": 0
-    }
+    stats = {"total_files": 0, "total_lines": 0, "total_characters": 0}
     file_data_list = []
-
     for file_path in files_to_process:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-
             relative_path = os.path.relpath(file_path, target_dir)
             stats["total_files"] += 1
             stats["total_lines"] += len(content.splitlines())
@@ -107,23 +99,32 @@ def main():
         except IOError as e:
             print(f"Warning: Could not read file {file_path}: {e}", file=sys.stderr)
 
-    # --- Output Generation ---
+    # --- Output Generation and Handling ---
+    stats_str = f"Stats: {stats['total_files']} files, {stats['total_lines']} lines, {stats['total_characters']} characters."
+
+    # --- Handle JSON output first ---
+    if args.json:
+        output_string = viopi_json_output.generate_json_output(stats, file_data_list)
+        print(output_string)
+        # JSON mode finishes here
+        sys.exit(0)
+
+    # --- Standard Text Output Generation ---
     header = f"Directory Processed: {target_dir}\n"
     tree_output = viopi_utils.generate_tree_output(target_dir, files_to_process)
     file_contents_str = "\n\n---\nCombined file contents:\n"
     for file_data in file_data_list:
         file_contents_str += f"\n--- FILE: {file_data['path']} ---\n{file_data['content']}"
     
-    output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"
-    stats_str = f"Stats: {stats['total_files']} files, {stats['total_lines']} lines, {stats['total_characters']} characters."
+    text_output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"
 
-    # --- Final Output Handling ---
+    # --- Final Text Output Handling ---
     if args.stdout:
-        print(output_string)
+        print(text_output_string)
     elif args.copy:
         try:
             import pyperclip
-            pyperclip.copy(output_string)
+            pyperclip.copy(text_output_string)
             print("Viopi output copied to clipboard.")
             print(stats_str)
         except ImportError:
@@ -138,7 +139,7 @@ def main():
         try:
             with open(append_path, 'a', encoding='utf-8') as f:
                 f.write(f"\n\n--- Appended on {datetime.now().isoformat()} ---\n")
-                f.write(output_string)
+                f.write(text_output_string)
             print(f"Output appended to {append_path}")
             print(stats_str)
         except IOError as e:
@@ -149,7 +150,7 @@ def main():
         output_filename = get_next_versioned_filename(OUTPUT_BASENAME, OUTPUT_EXTENSION, target_dir)
         try:
             with open(output_filename, 'w', encoding='utf-8') as f:
-                f.write(output_string)
+                f.write(text_output_string)
             print(f"Output saved to {output_filename}")
             print(stats_str)
         except IOError as e:

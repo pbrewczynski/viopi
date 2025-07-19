@@ -28,10 +28,11 @@ Options:
   -h, --help            Show this help message and exit.
   -v, --version         Show the version number and exit.
   
-  --stdout              Print output to stdout instead of a file.
-  --copy                Copy output to the system clipboard.
+  --stdout              Print formatted text output to stdout instead of a file.
+  --copy                Copy formatted text output to the system clipboard.
+  --json                Output the data in JSON format to stdout.
   
-  --append              Appends output to the base file `{append_filename}`
+  --append              Appends formatted text output to the base file `{append_filename}`
                         instead of creating a new versioned file.
                         
   --no-follow-links     Disable following symbolic links.
@@ -45,6 +46,9 @@ Examples:
 
   # Pipe context to another tool
   viopi --stdout | llm -s "Summarize this"
+
+  # Get structured JSON output and save it to a file
+  viopi --json src/api > api_context.json
 """
     print(help_text)
     sys.exit(0)
