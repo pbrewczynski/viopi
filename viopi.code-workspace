@@ -4,5 +4,7 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"editor.wrappingColumn": 0 // Disable word wrapping
+	}
 }
