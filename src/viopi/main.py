@@ -1,3 +1,4 @@
+# FILE: src/viopi/main.py
 # main.py
 
 import argparse
@@ -18,6 +19,7 @@ from .viopi_version import get_project_version, print_version_and_exit
 OUTPUT_BASENAME = "_viopi_output"
 OUTPUT_EXTENSION = ".viopi"
 APPEND_FILENAME = f"{OUTPUT_BASENAME}{OUTPUT_EXTENSION}"
+HUGE_FILE_THRESHOLD_BYTES = 100 * 1024  # 100 KiB
 
 def get_next_versioned_filename(base: str, ext: str, directory: str) -> str:
     version = 1
@@ -66,21 +68,53 @@ def main():
     if not os.path.isdir(target_dir):
         viopi_printer.print_error(f"Directory not found at '{target_dir}'")
 
-    # --- 2. Data Collection (CORRECTED) ---
-    # Get the ignore spec AND the root path to check against
+    # --- 2. Data Collection ---
     if args.show_ignore:
         _, _, annotated = viopi_ignorer.get_ignore_config(target_dir, return_annotated=True)
         print(viopi_ignorer.format_combined_ignore(annotated))
         sys.exit(0)
 
     ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
-    # ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
     follow_links = not args.no_follow_links
     
-    # Pass both the spec and the root to the file lister
     files_to_process, ignored_count = viopi_utils.get_file_list(
         target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
+
+    # --- NEW: INTERACTIVE HUGE FILE HANDLING ---
+    final_files_to_process = []
+    newly_ignored_paths = []
+    if files_to_process:
+        for file_path_str in files_to_process:
+            try:
+                file_path = Path(file_path_str)
+                file_size = file_path.stat().st_size
+
+                if file_size > HUGE_FILE_THRESHOLD_BYTES:
+                    if viopi_printer.prompt_to_ignore_huge_file(file_path, file_size):
+                        rel_path_to_ignore = file_path.relative_to(ignore_root)
+                        newly_ignored_paths.append(str(rel_path_to_ignore))
+                        ignored_count += 1
+                        continue
+                
+                final_files_to_process.append(file_path_str)
+            except (FileNotFoundError, Exception) as e:
+                viopi_printer.print_warning(f"Could not stat file {file_path_str}: {e}. Skipping.")
+                ignored_count += 1
+
+    if newly_ignored_paths:
+        ignore_file_path = Path(target_dir) / viopi_ignorer.REPO_IGNORE_FILENAME
+        try:
+            with open(ignore_file_path, 'a', encoding='utf-8') as f:
+                f.write("\n# Added by viopi (huge file prompt)\n")
+                for path_to_ignore in sorted(newly_ignored_paths):
+                    f.write(f"{path_to_ignore}\n")
+            viopi_printer.print_info(f"Added {len(newly_ignored_paths)} entr(y/ies) to {ignore_file_path}")
+        except IOError as e:
+            viopi_printer.print_error(f"Could not write to {ignore_file_path}: {e}", is_fatal=False)
+
+    files_to_process = final_files_to_process
+    # --- END OF NEW LOGIC ---
 
     if not files_to_process:
         viopi_printer.print_warning("No files found matching the criteria. Exiting.")
@@ -99,7 +133,7 @@ def main():
         except IOError as e:
             viopi_printer.print_warning(f"Could not read file {file_path}: {e}")
 
-    # --- 3. Output Generation (No changes needed) ---
+    # --- 3. Output Generation ---
     if args.json:
         json_string = viopi_json_output.generate_json_output(stats, file_data_list)
         stats["payload_size_bytes"] = len(json_string.encode('utf-8'))
@@ -114,7 +148,7 @@ def main():
         text_output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"
         stats["payload_size_bytes"] = len(text_output_string.encode('utf-8'))
 
-        # --- 4. Final Output Handling (No changes needed) ---
+        # --- 4. Final Output Handling ---
         if args.stdout:
             print(text_output_string)
         elif args.copy:

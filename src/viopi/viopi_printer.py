@@ -1,5 +1,8 @@
+# FILE: src/viopi/viopi_printer.py
 # viopi_printer.py
 # Handles all user-facing print statements and status reports.
+import sys
+from pathlib import Path
 
 def _format_bytes(size_bytes: int, precision: int = 2) -> str:
     """Converts a size in bytes to a human-readable string (KB, MB, etc.)."""
@@ -41,14 +44,38 @@ def print_success_append(stats: dict, filename: str):
     print(f"Output appended to {filename}")
     _print_stats(stats)
 
+def print_info(message: str):
+    """Prints a standard informational message to stderr."""
+    print(f"Info: {message}", file=sys.stderr)
+
+def prompt_to_ignore_huge_file(path: Path, size_bytes: int) -> bool:
+    """Prompts the user about a large file and asks if it should be ignored."""
+    size_str = _format_bytes(size_bytes)
+    # Using stderr for prompts to not interfere with stdout piping
+    print(f"\nWarning: File '{path.name}' is large ({size_str}).", file=sys.stderr)
+    print(f"  Full path: {path}", file=sys.stderr)
+    
+    while True:
+        try:
+            # Default to 'N' for safety
+            response = input("Add this file to .viopi_ignore and skip it? (y/N): ").lower().strip()
+            if response in ['y', 'yes']:
+                print("", file=sys.stderr) # Add a blank line for readability
+                return True
+            if response in ['n', 'no', '']: # Empty input defaults to No
+                print("", file=sys.stderr)
+                return False
+            print("Please enter 'y' or 'n'.", file=sys.stderr)
+        except EOFError: # Handle case where input stream is closed
+            print("\nInput stream closed. Defaulting to 'No'.", file=sys.stderr)
+            return False
+
 def print_error(message: str, is_fatal: bool = True):
     """Prints a formatted error message."""
-    import sys
     print(f"Error: {message}", file=sys.stderr)
     if is_fatal:
         sys.exit(1)
 
 def print_warning(message: str):
     """Prints a formatted warning message."""
-    import sys
     print(f"Warning: {message}", file=sys.stderr)
