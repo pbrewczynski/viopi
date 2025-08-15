@@ -41,7 +41,13 @@ def main():
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--stdout", action="store_true")
     output_group.add_argument("--copy", action="store_true")
+
     output_group.add_argument("--append", action="store_true")
+    parser.add_argument("-s", "--summary", action="store_true",
+                        help="Print a summary of the files that would be "
+                             "included (after ignore rules / huge-file prompts) "
+                             "and exit.")
+
     output_group.add_argument("--json", action="store_true")
     parser.add_argument("--no-follow-links", action="store_true")
     parser.add_argument("--show-ignore", action="store_true",
@@ -80,6 +86,18 @@ def main():
     files_to_process_tuples, ignored_count = viopi_utils.get_file_list(
         target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
+
+    # --- SUMMARY FLAG --------------------------------------------------------
+    # If the user asked for a summary we show the final list of logical paths
+    # that will be processed, plus a simple count, then exit.
+    if args.summary:
+        print(f"Directory Processed: {target_dir}")
+        print("--- Files that will be included ---")
+        for _, logical_path in files_to_process_tuples:
+            print(logical_path)
+        print(f"\nTotal files: {len(files_to_process_tuples)}")
+        sys.exit(0)
+    # -------------------------------------------------------------------------
 
     # --- NEW: INTERACTIVE HUGE FILE HANDLING ---
     final_files_to_process_tuples = []
