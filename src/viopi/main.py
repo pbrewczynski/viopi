@@ -29,6 +29,41 @@ def get_next_versioned_filename(base: str, ext: str, directory: str) -> str:
             return str(filename)
         version += 1
 
+def get_language_from_filename(filename: str) -> str:
+    """Guess the markdown language tag from a filename."""
+    # A mapping of file extensions to markdown language identifiers
+    ext_map = {
+        # Web
+        ".html": "html", ".css": "css", ".scss": "scss",
+        ".js": "javascript", ".jsx": "jsx",
+        ".ts": "typescript", ".tsx": "tsx",
+        # Python
+        ".py": "python",
+        # Mobile
+        ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
+        ".java": "java", ".m": "objectivec",
+        # C-family
+        ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp", ".cs": "csharp",
+        # Backend
+        ".go": "go", ".rs": "rust", ".rb": "ruby", ".php": "php",
+        # Scripting & Shell
+        ".sh": "shell", ".bash": "bash", ".zsh": "zsh", ".ps1": "powershell",
+        ".pl": "perl", ".lua": "lua",
+        # Data & Config
+        ".json": "json", ".xml": "xml", ".yaml": "yaml", ".yml": "yaml",
+        ".md": "markdown", ".sql": "sql",
+        # Other
+        ".r": "r", ".dockerfile": "dockerfile", "Dockerfile": "dockerfile",
+    }
+    # Handle files with no extension like 'Dockerfile'
+    name = Path(filename).name
+    if name in ext_map:
+        return ext_map[name]
+    
+    # Handle extensions
+    suffix = Path(filename).suffix.lower()
+    return ext_map.get(suffix, "") # Return empty string if not found
+
 def main():
     """Main function to run the viopi tool."""
     parser = argparse.ArgumentParser(
@@ -52,6 +87,8 @@ def main():
     parser.add_argument("--no-follow-links", action="store_true")
     parser.add_argument("--show-ignore", action="store_true",
     help="Print the combined .viopi_ignore patterns (with sources) and exit.")
+    parser.add_argument("--no-code-fences", action="store_true",
+    help="Do not wrap file contents in triple-backtick code fences.")
 
     args = parser.parse_args()
     version = get_project_version()
@@ -164,9 +201,16 @@ def main():
         header = f"Directory Processed: {target_dir}\n"
         logical_paths = [t[1] for t in files_to_process_tuples]
         tree_output = viopi_utils.generate_tree_output(logical_paths)
-        file_contents_str = "\n\n---\nCombined file contents:\n"
+        
+        file_contents_str = "\n\n---\nCombined file contents:"
         for file_data in file_data_list:
-            file_contents_str += f"\n--- FILE: {file_data['path']} ---\n{file_data['content']}"
+            file_contents_str += f"\n\n--- FILE: {file_data['path']} ---"
+            if not args.no_code_fences:
+                lang = get_language_from_filename(file_data['path'])
+                file_contents_str += f"\n```{lang}\n{file_data['content']}\n```"
+            else:
+                file_contents_str += f"\n{file_data['content']}"
+
         text_output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"
         stats["payload_size_bytes"] = len(text_output_string.encode('utf-8'))
 
