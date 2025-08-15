@@ -77,29 +77,32 @@ def main():
     ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
     follow_links = not args.no_follow_links
     
-    files_to_process, ignored_count = viopi_utils.get_file_list(
+    files_to_process_tuples, ignored_count = viopi_utils.get_file_list(
         target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
 
     # --- NEW: INTERACTIVE HUGE FILE HANDLING ---
-    final_files_to_process = []
+    final_files_to_process_tuples = []
     newly_ignored_paths = []
-    if files_to_process:
-        for file_path_str in files_to_process:
+    if files_to_process_tuples:
+        for physical_path_str, logical_path_str in files_to_process_tuples:
             try:
-                file_path = Path(file_path_str)
+                # Use the physical path for stat, but the logical path for display/ignore
+                file_path = Path(physical_path_str)
                 file_size = file_path.stat().st_size
 
                 if file_size > HUGE_FILE_THRESHOLD_BYTES:
-                    if viopi_printer.prompt_to_ignore_huge_file(file_path, file_size):
-                        rel_path_to_ignore = file_path.relative_to(ignore_root)
-                        newly_ignored_paths.append(str(rel_path_to_ignore))
+                    # Show the user the logical path for context
+                    logical_path_for_prompt = Path(logical_path_str)
+                    if viopi_printer.prompt_to_ignore_huge_file(logical_path_for_prompt, file_size):
+                        rel_path_to_ignore = Path(target_dir) / logical_path_str
+                        newly_ignored_paths.append(str(rel_path_to_ignore.relative_to(ignore_root)))
                         ignored_count += 1
                         continue
                 
-                final_files_to_process.append(file_path_str)
+                final_files_to_process_tuples.append((physical_path_str, logical_path_str))
             except (FileNotFoundError, Exception) as e:
-                viopi_printer.print_warning(f"Could not stat file {file_path_str}: {e}. Skipping.")
+                viopi_printer.print_warning(f"Could not stat file {physical_path_str}: {e}. Skipping.")
                 ignored_count += 1
 
     if newly_ignored_paths:
@@ -113,25 +116,25 @@ def main():
         except IOError as e:
             viopi_printer.print_error(f"Could not write to {ignore_file_path}: {e}", is_fatal=False)
 
-    files_to_process = final_files_to_process
+    files_to_process_tuples = final_files_to_process_tuples
     # --- END OF NEW LOGIC ---
 
-    if not files_to_process:
+    if not files_to_process_tuples:
         viopi_printer.print_warning("No files found matching the criteria. Exiting.")
         sys.exit(0)
 
     stats = { "total_files": 0, "total_lines": 0, "total_characters": 0, "files_ignored": ignored_count }
     file_data_list = []
-    for file_path in files_to_process:
+    for physical_path, logical_path in files_to_process_tuples:
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(physical_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             stats["total_files"] += 1
             stats["total_lines"] += len(content.splitlines())
             stats["total_characters"] += len(content)
-            file_data_list.append({"path": os.path.relpath(file_path, target_dir), "content": content})
+            file_data_list.append({"path": logical_path, "content": content})
         except IOError as e:
-            viopi_printer.print_warning(f"Could not read file {file_path}: {e}")
+            viopi_printer.print_warning(f"Could not read file {physical_path}: {e}")
 
     # --- 3. Output Generation ---
     if args.json:
@@ -141,7 +144,8 @@ def main():
         print(output_string)
     else:
         header = f"Directory Processed: {target_dir}\n"
-        tree_output = viopi_utils.generate_tree_output(target_dir, files_to_process)
+        logical_paths = [t[1] for t in files_to_process_tuples]
+        tree_output = viopi_utils.generate_tree_output(logical_paths)
         file_contents_str = "\n\n---\nCombined file contents:\n"
         for file_data in file_data_list:
             file_contents_str += f"\n--- FILE: {file_data['path']} ---\n{file_data['content']}"
