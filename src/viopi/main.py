@@ -130,8 +130,11 @@ def main():
     if args.summary:
         print(f"Directory Processed: {target_dir}")
         print("--- Files that will be included ---")
-        for _, logical_path in files_to_process_tuples:
-            print(logical_path)
+        for _, logical_path, is_symlink in files_to_process_tuples:
+            line = logical_path
+            if is_symlink:
+                line += " -> [symbolic link]"
+            print(line)
         print(f"\nTotal files: {len(files_to_process_tuples)}")
         sys.exit(0)
     # -------------------------------------------------------------------------
@@ -140,7 +143,7 @@ def main():
     final_files_to_process_tuples = []
     newly_ignored_paths = []
     if files_to_process_tuples:
-        for physical_path_str, logical_path_str in files_to_process_tuples:
+        for physical_path_str, logical_path_str, is_symlink in files_to_process_tuples:
             try:
                 # Use the physical path for stat, but the logical path for display/ignore
                 file_path = Path(physical_path_str)
@@ -155,7 +158,7 @@ def main():
                         ignored_count += 1
                         continue
                 
-                final_files_to_process_tuples.append((physical_path_str, logical_path_str))
+                final_files_to_process_tuples.append((physical_path_str, logical_path_str, is_symlink))
             except (FileNotFoundError, Exception) as e:
                 viopi_printer.print_warning(f"Could not stat file {physical_path_str}: {e}. Skipping.")
                 ignored_count += 1
@@ -180,7 +183,7 @@ def main():
 
     stats = { "total_files": 0, "total_lines": 0, "total_characters": 0, "files_ignored": ignored_count }
     file_data_list = []
-    for physical_path, logical_path in files_to_process_tuples:
+    for physical_path, logical_path, _ in files_to_process_tuples:
         try:
             with open(physical_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
@@ -199,8 +202,8 @@ def main():
         print(output_string)
     else:
         header = f"Directory Processed: {target_dir}\n"
-        logical_paths = [t[1] for t in files_to_process_tuples]
-        tree_output = viopi_utils.generate_tree_output(logical_paths)
+        path_symlink_info = [(t[1], t[2]) for t in files_to_process_tuples]
+        tree_output = viopi_utils.generate_tree_output(path_symlink_info)
         
         file_contents_str = "\n\n---\nCombined file contents:"
         for file_data in file_data_list:

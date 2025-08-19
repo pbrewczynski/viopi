@@ -11,14 +11,14 @@ def get_file_list(
     follow_links: bool,
     ignore_spec: PathSpec,
     ignore_root: Path
-) -> tuple[list[tuple[str, str]], int]:
+) -> tuple[list[tuple[str, str, bool]], int]:
     """
     Finds all files matching patterns, respecting an ignore spec.
     Handles symbolic links by tracking both logical and physical paths.
 
     Returns:
         A tuple containing:
-        - A list of (absolute_physical_path, logical_path_relative_to_scan_dir) tuples.
+        - A list of (absolute_physical_path, logical_path_relative_to_scan_dir, is_symlink_flag) tuples.
         - The total number of files and directories that were ignored.
     """
     scan_path = Path(scan_dir).resolve()
@@ -26,7 +26,7 @@ def get_file_list(
     if not patterns:
         patterns = ["**/*"]
 
-    # List of (physical_path: Path, logical_path_relative_to_scan_dir: Path)
+    # List of (physical_path: Path, logical_path_relative_to_scan_dir: Path, is_symlink: bool)
     all_files_found = []
     
     # Queue for BFS. Tuples are (physical_path: Path, logical_path_relative_to_scan_dir: Path)
@@ -56,10 +56,11 @@ def get_file_list(
                 entry_physical_path = Path(entry.path)
                 entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
                 entry_logical_path_rel_to_ignore_root = logical_dir_rel_to_ignore_root / entry.name
+                is_symlink = entry.is_symlink()
 
                 path_to_check = str(entry_logical_path_rel_to_ignore_root)
                 is_dir_like = entry.is_dir(follow_symlinks=False) or \
-                              (follow_links and entry.is_symlink() and entry_physical_path.is_dir())
+                              (follow_links and is_symlink and entry_physical_path.is_dir())
                 if is_dir_like:
                     path_to_check += '/'
 
@@ -70,13 +71,13 @@ def get_file_list(
                 if entry.is_dir(follow_symlinks=False):
                     queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
                 elif entry.is_file(follow_symlinks=False):
-                    all_files_found.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
-                elif follow_links and entry.is_symlink():
+                    all_files_found.append((entry_physical_path, entry_logical_path_rel_to_scan_dir, False))
+                elif follow_links and is_symlink:
                     try:
                         if entry_physical_path.is_dir():
                             queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
                         elif entry_physical_path.is_file():
-                            all_files_found.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
+                            all_files_found.append((entry_physical_path, entry_logical_path_rel_to_scan_dir, True))
                     except (FileNotFoundError, OSError):
                         ignored_count += 1
                         continue
@@ -85,10 +86,10 @@ def get_file_list(
             continue
     
     included_files = []
-    for physical_path, logical_path_rel_to_scan_dir in all_files_found:
+    for physical_path, logical_path_rel_to_scan_dir, is_symlink in all_files_found:
         if any(physical_path.match(p) for p in patterns):
             included_files.append(
-                (str(physical_path.resolve()), str(logical_path_rel_to_scan_dir))
+                (str(physical_path.resolve()), str(logical_path_rel_to_scan_dir), is_symlink)
             )
 
     final_ignored_count = ignored_count + (len(all_files_found) - len(included_files))
@@ -98,11 +99,14 @@ def get_file_list(
     return included_files, final_ignored_count
 
 
-def generate_tree_output(logical_path_list: list[str]) -> str:
+def generate_tree_output(logical_path_info_list: list[tuple[str, bool]]) -> str:
     """
     Generates a string representing the file tree from a list of logical paths.
     """
     tree_lines = ["--- File Tree ---"]
-    for p in sorted(logical_path_list):
-        tree_lines.append(p)
+    for path, is_symlink in sorted(logical_path_info_list, key=lambda x: x[0]):
+        line = path
+        if is_symlink:
+            line += " -> [symbolic link]"
+        tree_lines.append(line)
     return "\n".join(tree_lines)
