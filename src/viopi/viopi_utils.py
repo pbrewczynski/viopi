@@ -5,6 +5,32 @@ from pathspec import PathSpec
 from collections import deque
 
 
+def format_bytes(size_bytes: int, precision: int = 2) -> str:
+    """Converts a size in bytes to a human-readable string (KB, MB, etc.)."""
+    if size_bytes == 0:
+        return "0 B"
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    power = 1024
+    i = 0
+    while size_bytes >= power and i < len(units) - 1:
+        size_bytes /= power
+        i += 1
+    return f"{size_bytes:.{precision}f} {units[i]}"
+
+
+def is_binary_file(filepath: str, chunk_size: int = 1024) -> bool:
+    """
+    Heuristically determines if a file is binary by checking for null bytes
+    in the first chunk of the file.
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            chunk = f.read(chunk_size)
+        return b'\x00' in chunk
+    except (IOError, FileNotFoundError):
+        return False
+
+
 def get_file_list(
     scan_dir: str,
     patterns: list[str],

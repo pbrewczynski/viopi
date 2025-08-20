@@ -1,6 +1,3 @@
-# FILE: src/viopi/main.py
-# main.py
-
 import argparse
 import os
 import sys
@@ -64,6 +61,54 @@ def get_language_from_filename(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     return ext_map.get(suffix, "") # Return empty string if not found
 
+def handle_suggest_ignore(files_to_process_tuples, target_dir_path: Path, ignore_root: Path):
+    """
+    Scans files for being large or binary and prints a suggested ignore list.
+    """
+    large_files = []
+    binary_files = []
+
+    for physical_path_str, logical_path_str, _ in files_to_process_tuples:
+        try:
+            file_path = Path(physical_path_str)
+            
+            # The path for ignore file should be relative to ignore_root
+            rel_path_to_ignore = (target_dir_path / logical_path_str).relative_to(ignore_root)
+
+            # Check if binary first.
+            if viopi_utils.is_binary_file(physical_path_str):
+                binary_files.append(str(rel_path_to_ignore))
+                continue
+
+            # If not binary, check if it's huge.
+            file_size = file_path.stat().st_size
+            if file_size > HUGE_FILE_THRESHOLD_BYTES:
+                large_files.append((str(rel_path_to_ignore), file_size))
+
+        except (FileNotFoundError, Exception) as e:
+            viopi_printer.print_warning(f"Could not process {physical_path_str}: {e}. Skipping.")
+
+    if not binary_files and not large_files:
+        viopi_printer.print_info("No binary or large files found to suggest for ignoring.")
+        return
+
+    # Print to stdout, as this is the primary output of this mode
+    print("# Viopi: Suggested ignores for binary or large files.")
+    print("# Add these lines to your .viopi_ignore file to exclude them.\n")
+
+    if binary_files:
+        print("# --- Binary Files ---")
+        for path in sorted(binary_files):
+            print(path)
+        print("")
+
+    if large_files:
+        print(f"# --- Large Files (over {HUGE_FILE_THRESHOLD_BYTES // 1024} KiB) ---")
+        for path, size in sorted(large_files):
+            size_str = viopi_utils.format_bytes(size)
+            print(f"{path} # {size_str}")
+        print("")
+
 def main():
     """Main function to run the viopi tool."""
     parser = argparse.ArgumentParser(
@@ -84,6 +129,8 @@ def main():
                              "and exit.")
 
     output_group.add_argument("--json", action="store_true")
+    output_group.add_argument("--suggest-ignore", action="store_true",
+        help="Scan for and print paths of binary or very large files to suggest for .viopi_ignore.")
     parser.add_argument("--no-follow-links", action="store_true")
     parser.add_argument("--show-ignore", action="store_true",
     help="Print the combined .viopi_ignore patterns (with sources) and exit.")
@@ -123,6 +170,11 @@ def main():
     files_to_process_tuples, ignored_count = viopi_utils.get_file_list(
         target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
+
+    # --- SUGGEST IGNORE FLAG ---
+    if args.suggest_ignore:
+        handle_suggest_ignore(files_to_process_tuples, Path(target_dir), ignore_root)
+        sys.exit(0)
 
     # --- SUMMARY FLAG --------------------------------------------------------
     # If the user asked for a summary we show the final list of logical paths

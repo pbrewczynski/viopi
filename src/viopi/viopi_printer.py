@@ -1,24 +1,12 @@
-# FILE: src/viopi/viopi_printer.py
-# viopi_printer.py
 # Handles all user-facing print statements and status reports.
 import sys
 from pathlib import Path
 
-def _format_bytes(size_bytes: int, precision: int = 2) -> str:
-    """Converts a size in bytes to a human-readable string (KB, MB, etc.)."""
-    if size_bytes == 0:
-        return "0 B"
-    units = ['B', 'KB', 'MB', 'GB', 'TB']
-    power = 1024
-    i = 0
-    while size_bytes >= power and i < len(units) - 1:
-        size_bytes /= power
-        i += 1
-    return f"{size_bytes:.{precision}f} {units[i]}"
+from . import viopi_utils
 
 def _print_stats(stats: dict):
     """Prints the formatted statistics block."""
-    payload_size_str = _format_bytes(stats.get("payload_size_bytes", 0))
+    payload_size_str = viopi_utils.format_bytes(stats.get("payload_size_bytes", 0))
     
     print("-" * 20)
     print("Viopi Run Statistics:")
@@ -50,7 +38,7 @@ def print_info(message: str):
 
 def prompt_to_ignore_huge_file(path: Path, size_bytes: int) -> bool:
     """Prompts the user about a large file and asks if it should be ignored."""
-    size_str = _format_bytes(size_bytes)
+    size_str = viopi_utils.format_bytes(size_bytes)
     # Using stderr for prompts to not interfere with stdout piping
     print(f"\nWarning: File '{path.name}' is large ({size_str}).", file=sys.stderr)
     print(f"  Full path: {path}", file=sys.stderr)
@@ -79,3 +67,4 @@ def print_error(message: str, is_fatal: bool = True):
 def print_warning(message: str):
     """Prints a formatted warning message."""
     print(f"Warning: {message}", file=sys.stderr)
+
