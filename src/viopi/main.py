@@ -56,7 +56,7 @@ def get_language_from_filename(filename: str) -> str:
     name = Path(filename).name
     if name in ext_map:
         return ext_map[name]
-    
+
     # Handle extensions
     suffix = Path(filename).suffix.lower()
     return ext_map.get(suffix, "") # Return empty string if not found
@@ -71,7 +71,7 @@ def handle_suggest_ignore(files_to_process_tuples, target_dir_path: Path, ignore
     for physical_path_str, logical_path_str, _ in files_to_process_tuples:
         try:
             file_path = Path(physical_path_str)
-            
+
             # The path for ignore file should be relative to ignore_root
             rel_path_to_ignore = (target_dir_path / logical_path_str).relative_to(ignore_root)
 
@@ -138,6 +138,12 @@ def main():
     help="Do not wrap file contents in triple-backtick code fences.")
 
     args = parser.parse_args()
+
+    # Configure the printer based on args. If --stdout is used, suppress
+    # all non-essential stderr output like warnings and info messages.
+    if args.stdout:
+        viopi_printer.configure(silent=True)
+
     version = get_project_version()
 
     if args.help:
@@ -166,7 +172,7 @@ def main():
 
     ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
     follow_links = not args.no_follow_links
-    
+
     files_to_process_tuples, ignored_count = viopi_utils.get_file_list(
         target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
@@ -209,7 +215,7 @@ def main():
                         newly_ignored_paths.append(str(rel_path_to_ignore.relative_to(ignore_root)))
                         ignored_count += 1
                         continue
-                
+
                 final_files_to_process_tuples.append((physical_path_str, logical_path_str, is_symlink))
             except (FileNotFoundError, Exception) as e:
                 viopi_printer.print_warning(f"Could not stat file {physical_path_str}: {e}. Skipping.")
@@ -256,7 +262,7 @@ def main():
         header = f"Directory Processed: {target_dir}\n"
         path_symlink_info = [(t[1], t[2]) for t in files_to_process_tuples]
         tree_output = viopi_utils.generate_tree_output(path_symlink_info)
-        
+
         file_contents_str = "\n\n---\nCombined file contents:"
         for file_data in file_data_list:
             file_contents_str += f"\n\n--- FILE: {file_data['path']} ---"
