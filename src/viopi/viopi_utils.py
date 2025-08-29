@@ -3,7 +3,6 @@ from pathlib import Path
 from pathspec import PathSpec
 from collections import deque
 
-
 def format_bytes(size_bytes: int, precision: int = 2) -> str:
     """Converts a size in bytes to a human-readable string (KB, MB, etc.)."""
     if size_bytes == 0:
@@ -92,7 +91,6 @@ def get_file_list(
                 is_ignored_by_spec = ignore_spec.match_file(path_to_check)
 
                 if is_dir:
-                    # If the directory is not ignored, add it to the queue to scan its contents.
                     if not is_ignored_by_spec:
                         queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
                 else:
@@ -113,9 +111,7 @@ def get_file_list(
                     if is_ignored_by_spec:
                         ignored_files.append(file_tuple)
                     else:
-                        # Since we are now correctly skipping ignored directories,
-                        # we only need to check if the file matches the inclusion patterns.
-                        if any(entry_physical_path.match(p) for p in patterns):
+                        if any(Path(file_tuple[1]).match(p) for p in patterns):
                             included_files.append(file_tuple)
                         else:
                             ignored_files.append(file_tuple)
@@ -151,3 +147,50 @@ def generate_tree_output(path_info_list: list[tuple]) -> str:
 
         tree_lines.append(line)
     return "\n".join(tree_lines)
+
+
+# --- Example of how to use the functions to get the desired output ---
+if __name__ == '__main__':
+    # Define your scan parameters
+    scan_directory = "."
+    include_patterns = ["**/*.py", "**/*.md"]
+    follow_symlinks = False
+    
+    # Load ignore patterns from a .viopi_ignore file
+    ignore_root_path = Path(scan_directory).resolve()
+    ignore_patterns_list = []
+    try:
+        with open(Path(scan_directory) / '.viopi_ignore', 'r') as f:
+            ignore_patterns_list = f.read().splitlines()
+    except FileNotFoundError:
+        print("No .viopi_ignore file found.")
+
+    ignore_specification = PathSpec.from_lines('gitwildmatch', ignore_patterns_list)
+
+    # 1. Get both included and ignored files
+    included_files, ignored_files = get_file_list(
+        scan_dir=scan_directory,
+        patterns=include_patterns,
+        follow_links=follow_symlinks,
+        ignore_spec=ignore_specification,
+        ignore_root=ignore_root_path
+    )
+
+    # 2. Prepare a combined list for the tree output function
+    all_files_for_tree = []
+
+    # Add included files with the 'is_ignored' flag set to False
+    all_files_for_tree.extend([
+        (logical_path, is_symlink, False)
+        for _, logical_path, is_symlink in included_files
+    ])
+
+    # Add ignored files with the 'is_ignored' flag set to True
+    all_files_for_tree.extend([
+        (logical_path, is_symlink, True)
+        for _, logical_path, is_symlink in ignored_files
+    ])
+
+    # 3. Generate and print the unified tree
+    tree_output = generate_tree_output(all_files_for_tree)
+    print(tree_output)
