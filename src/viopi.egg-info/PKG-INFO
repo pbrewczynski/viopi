@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: viopi
-Version: 1.13.0
+Version: 1.14.0
 Summary: A tool for preparing project context for LLMs by concatenating files.
 Requires-Python: >=3.8
 Requires-Dist: pyperclip

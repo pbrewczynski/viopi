@@ -204,7 +204,8 @@ def main():
     final_files_to_process_tuples = []
     newly_ignored_paths = []
     if files_to_process_tuples:
-        for physical_path_str, logical_path_str, is_symlink in files_to_process_tuples:
+        for file_tuple in files_to_process_tuples:
+            physical_path_str, logical_path_str, is_symlink = file_tuple
             try:
                 # Use the physical path for stat, but the logical path for display/ignore
                 file_path = Path(physical_path_str)
@@ -216,12 +217,20 @@ def main():
                     if viopi_printer.prompt_to_ignore_huge_file(logical_path_for_prompt, file_size):
                         rel_path_to_ignore = Path(target_dir) / logical_path_str
                         newly_ignored_paths.append(str(rel_path_to_ignore.relative_to(ignore_root)))
+                        
+                        # --- FIX ---
+                        # Add to ignored list for --show-all and increment count
+                        ignored_files_tuples.append(file_tuple)
                         ignored_count += 1
-                        continue
+                        continue # Skip adding to final_files_to_process_tuples
 
-                final_files_to_process_tuples.append((physical_path_str, logical_path_str, is_symlink))
+                final_files_to_process_tuples.append(file_tuple)
             except (FileNotFoundError, Exception) as e:
                 viopi_printer.print_warning(f"Could not stat file {physical_path_str}: {e}. Skipping.")
+                
+                # --- FIX ---
+                # Add to ignored list for --show-all and increment count
+                ignored_files_tuples.append(file_tuple)
                 ignored_count += 1
 
     if newly_ignored_paths:
