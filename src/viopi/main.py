@@ -61,14 +61,14 @@ def get_language_from_filename(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     return ext_map.get(suffix, "") # Return empty string if not found
 
-def handle_suggest_ignore(files_to_process_tuples, target_dir_path: Path, ignore_root: Path):
+def handle_suggest_ignore(files_to_scan_tuples, target_dir_path: Path, ignore_root: Path):
     """
     Scans files for being large or binary and prints a suggested ignore list.
     """
     large_files = []
     binary_files = []
 
-    for physical_path_str, logical_path_str, _ in files_to_process_tuples:
+    for physical_path_str, logical_path_str, _ in files_to_scan_tuples:
         try:
             file_path = Path(physical_path_str)
 
@@ -134,6 +134,8 @@ def main():
     parser.add_argument("--no-follow-links", action="store_true")
     parser.add_argument("--show-ignore", action="store_true",
     help="Print the combined .viopi_ignore patterns (with sources) and exit.")
+    parser.add_argument("--show-all", action="store_true",
+    help="Show all discovered files in the file tree, including those ignored.")
     parser.add_argument("--no-code-fences", action="store_true",
     help="Do not wrap file contents in triple-backtick code fences.")
 
@@ -173,18 +175,18 @@ def main():
     ignore_spec, ignore_root = viopi_ignorer.get_ignore_config(target_dir)
     follow_links = not args.no_follow_links
 
-    files_to_process_tuples, ignored_count = viopi_utils.get_file_list(
+    files_to_process_tuples, ignored_files_tuples = viopi_utils.get_file_list(
         target_dir, patterns, follow_links, ignore_spec, ignore_root
     )
+    ignored_count = len(ignored_files_tuples)
 
     # --- SUGGEST IGNORE FLAG ---
     if args.suggest_ignore:
-        handle_suggest_ignore(files_to_process_tuples, Path(target_dir), ignore_root)
+        all_files_for_scan = files_to_process_tuples + ignored_files_tuples
+        handle_suggest_ignore(all_files_for_scan, Path(target_dir), ignore_root)
         sys.exit(0)
 
     # --- SUMMARY FLAG --------------------------------------------------------
-    # If the user asked for a summary we show the final list of logical paths
-    # that will be processed, plus a simple count, then exit.
     if args.summary:
         print(f"Directory Processed: {target_dir}")
         print("--- Files that will be included ---")
@@ -193,7 +195,8 @@ def main():
             if is_symlink:
                 line += " -> [symbolic link]"
             print(line)
-        print(f"\nTotal files: {len(files_to_process_tuples)}")
+        print(f"\nTotal files to be included: {len(files_to_process_tuples)}")
+        print(f"Total files ignored (by rules or patterns): {ignored_count}")
         sys.exit(0)
     # -------------------------------------------------------------------------
 
@@ -260,8 +263,17 @@ def main():
         print(output_string)
     else:
         header = f"Directory Processed: {target_dir}\n"
-        path_symlink_info = [(t[1], t[2]) for t in files_to_process_tuples]
-        tree_output = viopi_utils.generate_tree_output(path_symlink_info)
+
+        tree_items = []
+        if args.show_all:
+            processed_for_tree = [(lp, sl, False) for _, lp, sl in files_to_process_tuples]
+            ignored_for_tree = [(lp, sl, True) for _, lp, sl in ignored_files_tuples]
+            tree_items.extend(processed_for_tree)
+            tree_items.extend(ignored_for_tree)
+        else:
+            tree_items = [(lp, sl, False) for _, lp, sl in files_to_process_tuples]
+
+        tree_output = viopi_utils.generate_tree_output(tree_items)
 
         file_contents_str = "\n\n---\nCombined file contents:"
         for file_data in file_data_list:
