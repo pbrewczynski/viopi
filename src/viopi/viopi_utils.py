@@ -92,7 +92,9 @@ def get_file_list(
                 is_ignored_by_spec = ignore_spec.match_file(path_to_check)
 
                 if is_dir:
-                    queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
+                    # If the directory is not ignored, add it to the queue to scan its contents.
+                    if not is_ignored_by_spec:
+                        queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
                 else:
                     try:
                         is_file = entry.is_file(follow_symlinks=False) or \
@@ -103,14 +105,16 @@ def get_file_list(
                         continue
 
                     file_tuple = (
-                        str(entry_physical_path.resolve()), 
-                        str(entry_logical_path_rel_to_scan_dir), 
+                        str(entry_physical_path.resolve()),
+                        str(entry_logical_path_rel_to_scan_dir),
                         is_symlink
                     )
 
                     if is_ignored_by_spec:
                         ignored_files.append(file_tuple)
                     else:
+                        # Since we are now correctly skipping ignored directories,
+                        # we only need to check if the file matches the inclusion patterns.
                         if any(entry_physical_path.match(p) for p in patterns):
                             included_files.append(file_tuple)
                         else:
