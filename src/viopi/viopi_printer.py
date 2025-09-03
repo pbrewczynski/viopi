@@ -28,6 +28,9 @@ def _print_stats(stats: dict):
     print(f"  - Files Ignored:    {stats.get('files_ignored', 0)}", file=sys.stderr)
     print(f"  - Total Lines:      {stats.get('total_lines', 0)}", file=sys.stderr)
     print(f"  - Total Characters: {stats.get('total_characters', 0)}", file=sys.stderr)
+    if stats.get("total_chars_saved_minify", 0) > 0:
+        saved_str = viopi_utils.format_bytes(stats.get("total_chars_saved_minify", 0))
+        print(f"  - Minification Saved: {saved_str}", file=sys.stderr)
     print(f"  - Payload Size:     {payload_size_str}", file=sys.stderr)
     print("-" * 20, file=sys.stderr)
 

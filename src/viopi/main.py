@@ -9,6 +9,7 @@ from . import viopi_utils
 from . import viopi_ignorer
 from . import viopi_printer
 from . import viopi_json_output
+from . import viopi_minifier
 from .viopi_help import print_help_and_exit
 from .viopi_version import get_project_version, print_version_and_exit
 
@@ -131,6 +132,8 @@ def main():
     output_group.add_argument("--json", action="store_true")
     output_group.add_argument("--suggest-ignore", action="store_true",
         help="Scan for and print paths of binary or very large files to suggest for .viopi_ignore.")
+    parser.add_argument("--minify", action="store_true",
+                        help="Minify code files (JS, CSS, Python, HTML, JSON) to reduce token count.")
     parser.add_argument("--no-follow-links", action="store_true")
     parser.add_argument("--show-ignore", action="store_true",
     help="Print the combined .viopi_ignore patterns (with sources) and exit.")
@@ -217,7 +220,7 @@ def main():
                     if viopi_printer.prompt_to_ignore_huge_file(logical_path_for_prompt, file_size):
                         rel_path_to_ignore = Path(target_dir) / logical_path_str
                         newly_ignored_paths.append(str(rel_path_to_ignore.relative_to(ignore_root)))
-                        
+
                         # --- FIX ---
                         # Add to ignored list for --show-all and increment count
                         ignored_files_tuples.append(file_tuple)
@@ -227,7 +230,7 @@ def main():
                 final_files_to_process_tuples.append(file_tuple)
             except (FileNotFoundError, Exception) as e:
                 viopi_printer.print_warning(f"Could not stat file {physical_path_str}: {e}. Skipping.")
-                
+
                 # --- FIX ---
                 # Add to ignored list for --show-all and increment count
                 ignored_files_tuples.append(file_tuple)
@@ -251,12 +254,21 @@ def main():
         viopi_printer.print_warning("No files found matching the criteria. Exiting.")
         sys.exit(0)
 
-    stats = { "total_files": 0, "total_lines": 0, "total_characters": 0, "files_ignored": ignored_count }
+    stats = { "total_files": 0, "total_lines": 0, "total_characters": 0, "files_ignored": ignored_count, "total_chars_saved_minify": 0 }
     file_data_list = []
     for physical_path, logical_path, _ in files_to_process_tuples:
         try:
             with open(physical_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
+
+            if args.minify:
+                original_len = len(content)
+                minified_content = viopi_minifier.minify_content(content, logical_path)
+                if len(minified_content) < original_len:
+                    chars_saved = original_len - len(minified_content)
+                    stats["total_chars_saved_minify"] += chars_saved
+                content = minified_content
+
             stats["total_files"] += 1
             stats["total_lines"] += len(content.splitlines())
             stats["total_characters"] += len(content)

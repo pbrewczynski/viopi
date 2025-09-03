@@ -1,3 +1,4 @@
+
 # viopi_help.py
 # Displays the help message for the Viopi project.
 
@@ -21,20 +22,23 @@ Usage:
   viopi [options] [path] [pattern_1] [pattern_2] ...
 
 Default Behavior:
-  Creates a new, versioned output file on each run (e.g., {basename}_1{extension}, 
+  Creates a new, versioned output file on each run (e.g., {basename}_1{extension},
   {basename}_2{extension}, etc.) to prevent accidental overwrites.
 
 Options:
   -h, --help            Show this help message and exit.
   -v, --version         Show the version number and exit.
-  
+
   --stdout              Print formatted text output to stdout instead of a file.
   --copy                Copy formatted text output to the system clipboard.
   --json                Output the data in JSON format to stdout.
-  
+
   --append              Appends formatted text output to the base file `{append_filename}`
                         instead of creating a new versioned file.
-                        
+
+  --minify              Minify code (JS, CSS, Py, HTML, JSON) to reduce token count.
+                        Requires optional dependencies (e.g., 'pip install jsmin').
+
   --no-follow-links     Disable following symbolic links.
 
 Examples:
