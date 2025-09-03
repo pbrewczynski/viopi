@@ -6,12 +6,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "viopi"
-version = "1.18.0"
+version = "1.19.0"
 description = "A tool for preparing project context for LLMs by concatenating files."
 requires-python = ">=3.8"
 dependencies = [
     "pyperclip",
     "pathspec",
+    "python-minifier",
+    "csscompressor",
+    "jsmin",
+    "htmlmin",
 ]
 
 [project.scripts]
