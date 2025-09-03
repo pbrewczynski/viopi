@@ -56,6 +56,9 @@ def get_file_list(
     queue = deque([(scan_path, Path('.'))])
     visited_physical_paths = set()
 
+    # This path component is constant throughout the walk, so we calculate it once.
+    path_of_scan_dir_rel_to_ignore_root = scan_path.relative_to(ignore_root)
+
     while queue:
         physical_dir, logical_dir_rel_to_scan_dir = queue.popleft()
 
@@ -67,13 +70,14 @@ def get_file_list(
         except (FileNotFoundError, RuntimeError):
             continue
 
-        path_of_scan_dir_rel_to_ignore_root = scan_path.relative_to(ignore_root)
-
         try:
             for entry in sorted(os.scandir(physical_dir), key=lambda e: e.name):
                 entry_physical_path = Path(entry.path)
                 entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
-                entry_logical_path_rel_to_ignore_root = path_of_scan_dir_rel_to_ignore_root / entry.name
+
+                # FIX: The path to check against the ignore spec must be built from the full logical path
+                # relative to the ignore_root, not just the entry's name.
+                entry_logical_path_rel_to_ignore_root = path_of_scan_dir_rel_to_ignore_root / entry_logical_path_rel_to_scan_dir
                 is_symlink = entry.is_symlink()
 
                 is_dir = entry.is_dir(follow_symlinks=False)
@@ -155,7 +159,7 @@ if __name__ == '__main__':
     scan_directory = "."
     include_patterns = ["**/*.py", "**/*.md"]
     follow_symlinks = False
-    
+
     # Load ignore patterns from a .viopi_ignore file
     ignore_root_path = Path(scan_directory).resolve()
     ignore_patterns_list = []
