@@ -53,7 +53,7 @@ def get_file_list(
     included_files = []
     ignored_files = []
 
-    queue = deque([(scan_path, Path('.'))])
+    queue = deque([(scan_path, Path())])
     visited_physical_paths = set()
 
     # This path component is constant throughout the walk, so we calculate it once.
