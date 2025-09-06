@@ -1,3 +1,4 @@
+
 # viopi_minifier.py
 # Handles minification of various code files to reduce token count.
 

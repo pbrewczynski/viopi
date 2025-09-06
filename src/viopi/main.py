@@ -1,4 +1,3 @@
-I've added the --line-numbers command-line argument and updated the output generation logic to prepend line numbers when this flag is used. This change is integrated smoothly with existing features like minification and code fencing.
 
 import argparse
 import os
@@ -188,7 +187,7 @@ def main():
         handle_suggest_ignore(all_files_for_scan, Path(target_dir), ignore_root)
         sys.exit(0)
 
-  
+
     if args.summary:
         print(f"Directory Processed: {target_dir}")
         print("--- Files that will be included ---")
@@ -200,7 +199,7 @@ def main():
         print(f"\nTotal files to be included: {len(files_to_process_tuples)}")
         print(f"Total files ignored (by rules or patterns): {ignored_count}")
         sys.exit(0)
-   
+
     final_files_to_process_tuples = []
     newly_ignored_paths = []
     if files_to_process_tuples:
@@ -217,8 +216,6 @@ def main():
                     if viopi_printer.prompt_to_ignore_huge_file(logical_path_for_prompt, file_size):
                         rel_path_to_ignore = Path(target_dir) / logical_path_str
                         newly_ignored_paths.append(str(rel_path_to_ignore.relative_to(ignore_root)))
-
-                        # --- FIX ---
                         # Add to ignored list for --show-all and increment count
                         ignored_files_tuples.append(file_tuple)
                         ignored_count += 1
@@ -227,8 +224,6 @@ def main():
                 final_files_to_process_tuples.append(file_tuple)
             except (FileNotFoundError, Exception) as e:
                 viopi_printer.print_warning(f"Could not stat file {physical_path_str}: {e}. Skipping.")
-
-                # --- FIX ---
                 # Add to ignored list for --show-all and increment count
                 ignored_files_tuples.append(file_tuple)
                 ignored_count += 1

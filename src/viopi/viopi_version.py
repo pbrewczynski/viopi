@@ -1,3 +1,4 @@
+
 # viopi_version.py
 # Handles version detection and display for the Viopi project.
 

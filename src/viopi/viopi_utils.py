@@ -1,3 +1,4 @@
+
 import os
 from pathlib import Path
 from pathspec import PathSpec
@@ -74,12 +75,8 @@ def get_file_list(
             for entry in sorted(os.scandir(physical_dir), key=lambda e: e.name):
                 entry_physical_path = Path(entry.path)
                 entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
-
-                # FIX: The path to check against the ignore spec must be built from the full logical path
-                # relative to the ignore_root, not just the entry's name.
                 entry_logical_path_rel_to_ignore_root = path_of_scan_dir_rel_to_ignore_root / entry_logical_path_rel_to_scan_dir
                 is_symlink = entry.is_symlink()
-
                 is_dir = entry.is_dir(follow_symlinks=False)
                 if follow_links and is_symlink and not is_dir:
                     try:
@@ -88,7 +85,7 @@ def get_file_list(
                     except (FileNotFoundError, OSError):
                         continue
 
-                path_to_check = str(entry_logical_path_rel_to_ignore_root)
+                path_to_check = str(entry_logical_path_rel_to_scan_dir)
                 if is_dir:
                     path_to_check += '/'
 
