@@ -1,10 +1,11 @@
+I've added the --line-numbers command-line argument and updated the output generation logic to prepend line numbers when this flag is used. This change is integrated smoothly with existing features like minification and code fencing.
+
 import argparse
 import os
 import sys
 from pathlib import Path
 from datetime import datetime
 
-# Import all our custom modules
 from . import viopi_utils
 from . import viopi_ignorer
 from . import viopi_printer
@@ -13,7 +14,6 @@ from . import viopi_minifier
 from .viopi_help import print_help_and_exit
 from .viopi_version import get_project_version, print_version_and_exit
 
-# Config constants remain the same
 OUTPUT_BASENAME = "_viopi_output"
 OUTPUT_EXTENSION = ".viopi"
 APPEND_FILENAME = f"{OUTPUT_BASENAME}{OUTPUT_EXTENSION}"
@@ -58,7 +58,6 @@ def get_language_from_filename(filename: str) -> str:
     if name in ext_map:
         return ext_map[name]
 
-    # Handle extensions
     suffix = Path(filename).suffix.lower()
     return ext_map.get(suffix, "") # Return empty string if not found
 
@@ -141,6 +140,8 @@ def main():
     help="Show all discovered files in the file tree, including those ignored.")
     parser.add_argument("--no-code-fences", action="store_true",
     help="Do not wrap file contents in triple-backtick code fences.")
+    parser.add_argument("--line-numbers", action="store_true",
+    help="Prepend line numbers to each line of file content.")
 
     args = parser.parse_args()
 
@@ -156,7 +157,6 @@ def main():
     if args.version:
         print_version_and_exit()
 
-    # --- 1. Process Path and Patterns ---
     target_dir_str = "."
     patterns = []
     if args.path_and_patterns:
@@ -169,7 +169,6 @@ def main():
     if not os.path.isdir(target_dir):
         viopi_printer.print_error(f"Directory not found at '{target_dir}'")
 
-    # --- 2. Data Collection ---
     if args.show_ignore:
         _, _, annotated = viopi_ignorer.get_ignore_config(target_dir, return_annotated=True)
         print(viopi_ignorer.format_combined_ignore(annotated))
@@ -189,7 +188,7 @@ def main():
         handle_suggest_ignore(all_files_for_scan, Path(target_dir), ignore_root)
         sys.exit(0)
 
-    # --- SUMMARY FLAG --------------------------------------------------------
+  
     if args.summary:
         print(f"Directory Processed: {target_dir}")
         print("--- Files that will be included ---")
@@ -201,9 +200,7 @@ def main():
         print(f"\nTotal files to be included: {len(files_to_process_tuples)}")
         print(f"Total files ignored (by rules or patterns): {ignored_count}")
         sys.exit(0)
-    # -------------------------------------------------------------------------
-
-    # --- NEW: INTERACTIVE HUGE FILE HANDLING ---
+   
     final_files_to_process_tuples = []
     newly_ignored_paths = []
     if files_to_process_tuples:
@@ -248,7 +245,6 @@ def main():
             viopi_printer.print_error(f"Could not write to {ignore_file_path}: {e}", is_fatal=False)
 
     files_to_process_tuples = final_files_to_process_tuples
-    # --- END OF NEW LOGIC ---
 
     if not files_to_process_tuples:
         viopi_printer.print_warning("No files found matching the criteria. Exiting.")
@@ -276,7 +272,6 @@ def main():
         except IOError as e:
             viopi_printer.print_warning(f"Could not read file {physical_path}: {e}")
 
-    # --- 3. Output Generation ---
     if args.json:
         json_string = viopi_json_output.generate_json_output(stats, file_data_list)
         stats["payload_size_bytes"] = len(json_string.encode('utf-8'))
@@ -299,16 +294,26 @@ def main():
         file_contents_str = "\n\n---\nCombined file contents:"
         for file_data in file_data_list:
             file_contents_str += f"\n\n--- FILE: {file_data['path']} ---"
+
+            content_to_print = file_data['content']
+            if args.line_numbers:
+                lines = content_to_print.split('\n')
+                max_line_num = len(lines)
+                if max_line_num > 0:
+                    # Right-align line numbers for clean formatting
+                    padding = len(str(max_line_num))
+                    numbered_lines = [f"{str(i+1).rjust(padding)}: {line}" for i, line in enumerate(lines)]
+                    content_to_print = "\n".join(numbered_lines)
+
             if not args.no_code_fences:
                 lang = get_language_from_filename(file_data['path'])
-                file_contents_str += f"\n```{lang}\n{file_data['content']}\n```"
+                file_contents_str += f"\n```{lang}\n{content_to_print}\n```"
             else:
-                file_contents_str += f"\n{file_data['content']}"
+                file_contents_str += f"\n{content_to_print}"
 
         text_output_string = header + tree_output + file_contents_str + "\n\n--- End of context ---"
         stats["payload_size_bytes"] = len(text_output_string.encode('utf-8'))
 
-        # --- 4. Final Output Handling ---
         if args.stdout:
             print(text_output_string)
         elif args.copy:
