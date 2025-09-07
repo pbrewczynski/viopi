@@ -1,4 +1,3 @@
-
 import os
 from pathlib import Path
 from pathspec import PathSpec
@@ -29,7 +28,6 @@ def is_binary_file(filepath: str, chunk_size: int = 1024) -> bool:
     except (IOError, FileNotFoundError):
         return False
 
-
 def get_file_list(
     scan_dir: str,
     patterns: list[str],
@@ -57,9 +55,6 @@ def get_file_list(
     queue = deque([(scan_path, Path())])
     visited_physical_paths = set()
 
-    # This path component is constant throughout the walk, so we calculate it once.
-    path_of_scan_dir_rel_to_ignore_root = scan_path.relative_to(ignore_root)
-
     while queue:
         physical_dir, logical_dir_rel_to_scan_dir = queue.popleft()
 
@@ -75,17 +70,14 @@ def get_file_list(
             for entry in sorted(os.scandir(physical_dir), key=lambda e: e.name):
                 entry_physical_path = Path(entry.path)
                 entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
-                entry_logical_path_rel_to_ignore_root = path_of_scan_dir_rel_to_ignore_root / entry_logical_path_rel_to_scan_dir
-                is_symlink = entry.is_symlink()
-                is_dir = entry.is_dir(follow_symlinks=False)
-                if follow_links and is_symlink and not is_dir:
-                    try:
-                        if entry_physical_path.is_dir():
-                            is_dir = True
-                    except (FileNotFoundError, OSError):
-                        continue
 
-                path_to_check = str(entry_logical_path_rel_to_scan_dir)
+                # Use the path relative to the scan directory for ignore matching.
+                # .as_posix() ensures forward slashes, which pathspec expects.
+                path_to_check = entry_logical_path_rel_to_scan_dir.as_posix()
+
+                is_symlink = entry.is_symlink()
+                is_dir = entry.is_dir(follow_symlinks=follow_links)
+
                 if is_dir:
                     path_to_check += '/'
 
@@ -94,15 +86,7 @@ def get_file_list(
                 if is_dir:
                     if not is_ignored_by_spec:
                         queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
-                else:
-                    try:
-                        is_file = entry.is_file(follow_symlinks=False) or \
-                                  (follow_links and is_symlink and entry_physical_path.is_file())
-                        if not is_file:
-                            continue
-                    except (FileNotFoundError, OSError):
-                        continue
-
+                else: # It's a file
                     file_tuple = (
                         str(entry_physical_path.resolve()),
                         str(entry_logical_path_rel_to_scan_dir),
@@ -121,8 +105,114 @@ def get_file_list(
 
     included_files.sort(key=lambda x: x[1])
     ignored_files.sort(key=lambda x: x[1])
+    
+    # print("indlueded files")
+    # print(included_files)
+    # print("ignored_files files")
+    # print(ignored_files)
+
 
     return included_files, ignored_files
+
+# def get_file_list(
+#     scan_dir: str,
+#     patterns: list[str],
+#     follow_links: bool,
+#     ignore_spec: PathSpec,
+#     ignore_root: Path
+# ) -> tuple[list[tuple[str, str, bool]], list[tuple[str, str, bool]]]:
+#     """
+#     Walks the directory and classifies all files into 'included' or 'ignored'.
+#     'included': files not matching ignore spec AND matching user-provided glob patterns.
+#     'ignored': files matching ignore spec OR not matching user-provided glob patterns.
+
+#     Returns:
+#         A tuple of (included_files, ignored_files).
+#         Each list contains tuples of (absolute_physical_path, logical_path_relative_to_scan_dir, is_symlink_flag).
+#     """
+#     print("showing scan dir")
+#     print(scan_dir)
+#     scan_path = Path(scan_dir).resolve()
+
+#     if not patterns:
+#         patterns = ["**/*"]
+
+#     included_files = []
+#     ignored_files = []
+
+#     queue = deque([(scan_path, Path())])
+#     visited_physical_paths = set()
+
+#     # This path component is constant throughout the walk, so we calculate it once.
+#     path_of_scan_dir_rel_to_ignore_root = scan_path.relative_to(ignore_root)
+
+#     while queue:
+#         physical_dir, logical_dir_rel_to_scan_dir = queue.popleft()
+
+#         try:
+#             real_physical_dir = physical_dir.resolve()
+#             if real_physical_dir in visited_physical_paths:
+#                 continue
+#             visited_physical_paths.add(real_physical_dir)
+#         except (FileNotFoundError, RuntimeError):
+#             continue
+
+#         try:
+#             for entry in sorted(os.scandir(physical_dir), key=lambda e: e.name):
+#                 entry_physical_path = Path(entry.path)
+#                 entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
+#                 entry_logical_path_rel_to_ignore_root = path_of_scan_dir_rel_to_ignore_root / entry_logical_path_rel_to_scan_dir
+#                 is_symlink = entry.is_symlink()
+#                 is_dir = entry.is_dir(follow_symlinks=False)
+#                 if follow_links and is_symlink and not is_dir:
+#                     try:
+#                         if entry_physical_path.is_dir():
+#                             is_dir = True
+#                     except (FileNotFoundError, OSError):
+#                         continue
+
+#                 path_to_check = str(entry_logical_path_rel_to_ignore_root)
+#                 if is_dir:
+#                     path_to_check += '/'
+
+#                 is_ignored_by_spec = ignore_spec.match_file(path_to_check)
+
+#                 if is_dir:
+#                     if not is_ignored_by_spec:
+#                         queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
+#                 else:
+#                     try:
+#                         is_file = entry.is_file(follow_symlinks=False) or \
+#                                   (follow_links and is_symlink and entry_physical_path.is_file())
+#                         if not is_file:
+#                             continue
+#                     except (FileNotFoundError, OSError):
+#                         continue
+
+#                     file_tuple = (
+#                         str(entry_physical_path.resolve()),
+#                         str(entry_logical_path_rel_to_scan_dir),
+#                         is_symlink
+#                     )
+
+#                     if is_ignored_by_spec:
+#                         ignored_files.append(file_tuple)
+#                     else:
+#                         if any(Path(file_tuple[1]).match(p) for p in patterns):
+#                             included_files.append(file_tuple)
+#                         else:
+#                             ignored_files.append(file_tuple)
+#         except OSError:
+#             continue
+
+#     included_files.sort(key=lambda x: x[1])
+#     ignored_files.sort(key=lambda x: x[1])
+#     print("indlueded files")
+#     print(included_files)
+#     print("ignored_files files")
+#     print(ignored_files)
+
+#     return included_files, ignored_files
 
 
 def generate_tree_output(path_info_list: list[tuple]) -> str:
@@ -130,6 +220,8 @@ def generate_tree_output(path_info_list: list[tuple]) -> str:
     Generates a string representing the file tree from a list of path info tuples.
     Each tuple can be (path, is_symlink) or (path, is_symlink, is_ignored).
     """
+    # print("printing info list")
+    # print(path_info_list)
     tree_lines = ["--- File Tree ---"]
     for item in sorted(path_info_list, key=lambda x: x[0]):
         path, is_symlink = item[0], item[1]
@@ -154,7 +246,8 @@ def generate_tree_output(path_info_list: list[tuple]) -> str:
 if __name__ == '__main__':
     # Define your scan parameters
     scan_directory = "."
-    include_patterns = ["**/*.py", "**/*.md"]
+    include_patterns = ["**/*.py", "**/*.md", "**/*.txt"]
+    # , "**/*.md"]
     follow_symlinks = False
 
     # Load ignore patterns from a .viopi_ignore file
