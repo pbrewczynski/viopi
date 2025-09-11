@@ -1,290 +1,136 @@
+import argparse
 import os
-from pathlib import Path
-from pathspec import PathSpec
-from collections import deque
+import shutil
+import sys
 
-def format_bytes(size_bytes: int, precision: int = 2) -> str:
-    """Converts a size in bytes to a human-readable string (KB, MB, etc.)."""
-    if size_bytes == 0:
-        return "0 B"
-    units = ['B', 'KB', 'MB', 'GB', 'TB']
-    power = 1024
-    i = 0
-    while size_bytes >= power and i < len(units) - 1:
-        size_bytes /= power
-        i += 1
-    return f"{size_bytes:.{precision}f} {units[i]}"
+from .constants import C
+from .config import load_configuration
+from .prompt import build_prompt_parts
+from .client import generate_response
+from .output import (
+    handle_output,
+    print_configuration_summary,
+    print_payload_summary,
+    print_request_summary
+)
+from .utils import get_project_version
 
-
-def is_binary_file(filepath: str, chunk_size: int = 1024) -> bool:
-    """
-    Heuristically determines if a file is binary by checking for null bytes
-    in the first chunk of the file.
-    """
-    try:
-        with open(filepath, 'rb') as f:
-            chunk = f.read(chunk_size)
-        return b'\x00' in chunk
-    except (IOError, FileNotFoundError):
-        return False
-
-def get_file_list(
-    scan_dir: str,
-    patterns: list[str],
-    follow_links: bool,
-    ignore_spec: PathSpec,
-    ignore_root: Path
-) -> tuple[list[tuple[str, str, bool]], list[tuple[str, str, bool]]]:
-    """
-    Walks the directory and classifies all files into 'included' or 'ignored'.
-    'included': files not matching ignore spec AND matching user-provided glob patterns.
-    'ignored': files matching ignore spec OR not matching user-provided glob patterns.
-
-    Returns:
-        A tuple of (included_files, ignored_files).
-        Each list contains tuples of (absolute_physical_path, logical_path_relative_to_scan_dir, is_symlink_flag).
-    """
-    scan_path = Path(scan_dir).resolve()
-
-    if not patterns:
-        patterns = ["**/*"]
-
-    included_files = []
-    ignored_files = []
-
-    queue = deque([(scan_path, Path())])
-    visited_physical_paths = set()
-
-    while queue:
-        physical_dir, logical_dir_rel_to_scan_dir = queue.popleft()
-
-        try:
-            real_physical_dir = physical_dir.resolve()
-            if real_physical_dir in visited_physical_paths:
-                continue
-            visited_physical_paths.add(real_physical_dir)
-        except (FileNotFoundError, RuntimeError):
-            continue
-
-        try:
-            for entry in sorted(os.scandir(physical_dir), key=lambda e: e.name):
-                entry_physical_path = Path(entry.path)
-                entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
-
-                # Use the path relative to the scan directory for ignore matching.
-                # .as_posix() ensures forward slashes, which pathspec expects.
-                path_to_check = entry_logical_path_rel_to_scan_dir.as_posix()
-
-                is_symlink = entry.is_symlink()
-                is_dir = entry.is_dir(follow_symlinks=follow_links)
-
-                if is_dir:
-                    path_to_check += '/'
-
-                is_ignored_by_spec = ignore_spec.match_file(path_to_check)
-
-                if is_dir:
-                    if not is_ignored_by_spec:
-                        queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
-                else: # It's a file
-                    file_tuple = (
-                        str(entry_physical_path.resolve()),
-                        str(entry_logical_path_rel_to_scan_dir),
-                        is_symlink
-                    )
-
-                    if is_ignored_by_spec:
-                        ignored_files.append(file_tuple)
-                    else:
-                        if any(Path(file_tuple[1]).match(p) for p in patterns):
-                            included_files.append(file_tuple)
-                        else:
-                            ignored_files.append(file_tuple)
-        except OSError:
-            continue
-
-    included_files.sort(key=lambda x: x[1])
-    ignored_files.sort(key=lambda x: x[1])
-    
-    # print("indlueded files")
-    # print(included_files)
-    # print("ignored_files files")
-    # print(ignored_files)
-
-
-    return included_files, ignored_files
-
-# def get_file_list(
-#     scan_dir: str,
-#     patterns: list[str],
-#     follow_links: bool,
-#     ignore_spec: PathSpec,
-#     ignore_root: Path
-# ) -> tuple[list[tuple[str, str, bool]], list[tuple[str, str, bool]]]:
-#     """
-#     Walks the directory and classifies all files into 'included' or 'ignored'.
-#     'included': files not matching ignore spec AND matching user-provided glob patterns.
-#     'ignored': files matching ignore spec OR not matching user-provided glob patterns.
-
-#     Returns:
-#         A tuple of (included_files, ignored_files).
-#         Each list contains tuples of (absolute_physical_path, logical_path_relative_to_scan_dir, is_symlink_flag).
-#     """
-#     print("showing scan dir")
-#     print(scan_dir)
-#     scan_path = Path(scan_dir).resolve()
-
-#     if not patterns:
-#         patterns = ["**/*"]
-
-#     included_files = []
-#     ignored_files = []
-
-#     queue = deque([(scan_path, Path())])
-#     visited_physical_paths = set()
-
-#     # This path component is constant throughout the walk, so we calculate it once.
-#     path_of_scan_dir_rel_to_ignore_root = scan_path.relative_to(ignore_root)
-
-#     while queue:
-#         physical_dir, logical_dir_rel_to_scan_dir = queue.popleft()
-
-#         try:
-#             real_physical_dir = physical_dir.resolve()
-#             if real_physical_dir in visited_physical_paths:
-#                 continue
-#             visited_physical_paths.add(real_physical_dir)
-#         except (FileNotFoundError, RuntimeError):
-#             continue
-
-#         try:
-#             for entry in sorted(os.scandir(physical_dir), key=lambda e: e.name):
-#                 entry_physical_path = Path(entry.path)
-#                 entry_logical_path_rel_to_scan_dir = logical_dir_rel_to_scan_dir / entry.name
-#                 entry_logical_path_rel_to_ignore_root = path_of_scan_dir_rel_to_ignore_root / entry_logical_path_rel_to_scan_dir
-#                 is_symlink = entry.is_symlink()
-#                 is_dir = entry.is_dir(follow_symlinks=False)
-#                 if follow_links and is_symlink and not is_dir:
-#                     try:
-#                         if entry_physical_path.is_dir():
-#                             is_dir = True
-#                     except (FileNotFoundError, OSError):
-#                         continue
-
-#                 path_to_check = str(entry_logical_path_rel_to_ignore_root)
-#                 if is_dir:
-#                     path_to_check += '/'
-
-#                 is_ignored_by_spec = ignore_spec.match_file(path_to_check)
-
-#                 if is_dir:
-#                     if not is_ignored_by_spec:
-#                         queue.append((entry_physical_path, entry_logical_path_rel_to_scan_dir))
-#                 else:
-#                     try:
-#                         is_file = entry.is_file(follow_symlinks=False) or \
-#                                   (follow_links and is_symlink and entry_physical_path.is_file())
-#                         if not is_file:
-#                             continue
-#                     except (FileNotFoundError, OSError):
-#                         continue
-
-#                     file_tuple = (
-#                         str(entry_physical_path.resolve()),
-#                         str(entry_logical_path_rel_to_scan_dir),
-#                         is_symlink
-#                     )
-
-#                     if is_ignored_by_spec:
-#                         ignored_files.append(file_tuple)
-#                     else:
-#                         if any(Path(file_tuple[1]).match(p) for p in patterns):
-#                             included_files.append(file_tuple)
-#                         else:
-#                             ignored_files.append(file_tuple)
-#         except OSError:
-#             continue
-
-#     included_files.sort(key=lambda x: x[1])
-#     ignored_files.sort(key=lambda x: x[1])
-#     print("indlueded files")
-#     print(included_files)
-#     print("ignored_files files")
-#     print(ignored_files)
-
-#     return included_files, ignored_files
-
-
-def generate_tree_output(path_info_list: list[tuple]) -> str:
-    """
-    Generates a string representing the file tree from a list of path info tuples.
-    Each tuple can be (path, is_symlink) or (path, is_symlink, is_ignored).
-    """
-    # print("printing info list")
-    # print(path_info_list)
-    tree_lines = ["--- File Tree ---"]
-    for item in sorted(path_info_list, key=lambda x: x[0]):
-        path, is_symlink = item[0], item[1]
-        is_ignored = item[2] if len(item) > 2 else False
-
-        line = path
-
-        markers = []
-        if is_ignored:
-            markers.append("ignored")
-        if is_symlink:
-            markers.append("symbolic link")
-
-        if markers:
-            line += f" -> [{', '.join(markers)}]"
-
-        tree_lines.append(line)
-    return "\n".join(tree_lines)
-
-
-# --- Example of how to use the functions to get the desired output ---
-if __name__ == '__main__':
-    # Define your scan parameters
-    scan_directory = "."
-    include_patterns = ["**/*.py", "**/*.md", "**/*.txt"]
-    # , "**/*.md"]
-    follow_symlinks = False
-
-    # Load ignore patterns from a .viopi_ignore file
-    ignore_root_path = Path(scan_directory).resolve()
-    ignore_patterns_list = []
-    try:
-        with open(Path(scan_directory) / '.viopi_ignore', 'r') as f:
-            ignore_patterns_list = f.read().splitlines()
-    except FileNotFoundError:
-        print("No .viopi_ignore file found.")
-
-    ignore_specification = PathSpec.from_lines('gitwildmatch', ignore_patterns_list)
-
-    # 1. Get both included and ignored files
-    included_files, ignored_files = get_file_list(
-        scan_dir=scan_directory,
-        patterns=include_patterns,
-        follow_links=follow_symlinks,
-        ignore_spec=ignore_specification,
-        ignore_root=ignore_root_path
+def parse_arguments(config):
+    """Parses command-line arguments, using loaded config for defaults."""
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description=(
+            "A powerful, full-featured CLI for Google's Gemini models. \n"
+            "Prompt can be provided in three ways (in order of precedence):\n"
+            "1. Piped from stdin (e.g., `cat file.txt | gemi`)\n"
+            "2. Using the -p/--prompt flag (e.g., `gemi -p 'my prompt'`)\n"
+            "3. As positional arguments (e.g., `gemi my prompt text`)"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter
     )
+    # Argument definitions
+    parser.add_argument("prompt_positional", nargs='*', help="The text prompt as positional arguments. Used if -p/--prompt is not set.")
+    parser.add_argument("-p", "--prompt", help="The text prompt. Takes precedence over positional arguments.")
+    parser.add_argument("-f", "--file", dest="files", action="append", default=[], help="Path to a file for the prompt. Can be used multiple times.")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {get_project_version()}")
+    parser.add_argument("-o", "--output", help="Path to save response to a file.")
+    parser.add_argument("--open", action="store_true", help="Open the response in a temporary markdown file (macOS only).")
+    parser.add_argument("-c", "--profile", help="Configuration profile to use.")
+    parser.add_argument("-x", "--context", action="store_true", help="Enable context from config (prefix, postfix, context_script). Default is disabled.")
 
-    # 2. Prepare a combined list for the tree output function
-    all_files_for_tree = []
+    # Model and connection settings
+    parser.add_argument("--project", default=config.get('project'), help="Google Cloud project ID.")
+    parser.add_argument("--location", default=config.get('location'))
+    parser.add_argument("--model", default=config.get('model_name'), dest='model_name')
+    parser.add_argument("-t", "--temperature", type=float, default=float(config.get('temperature')))
+    parser.add_argument("--max-tokens", type=int, default=int(config.get('max_output_tokens')), dest='max_output_tokens')
+    parser.add_argument("--top-p", type=float, default=float(config.get('top_p')))
+    parser.add_argument("--top-k", type=int, default=int(config.get('top_k')))
 
-    # Add included files with the 'is_ignored' flag set to False
-    all_files_for_tree.extend([
-        (logical_path, is_symlink, False)
-        for _, logical_path, is_symlink in included_files
-    ])
+    # Context and output settings
+    parser.add_argument("--prefix-prompt", default=config.get('prefix_prompt'))
+    parser.add_argument("--postfix-prompt", default=config.get('postfix_prompt'))
+    parser.add_argument("--context-script", default=config.get('context_script'), help="Script whose stdout is injected as text context.")
+    parser.add_argument("--output-formatter", default=config.get('output_formatter'))
+    parser.add_argument("--no-show-payload", action="store_true", help="Do not print the final payload.")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose payload output and write out-debug.json.")
 
-    # Add ignored files with the 'is_ignored' flag set to True
-    all_files_for_tree.extend([
-        (logical_path, is_symlink, True)
-        for _, logical_path, is_symlink in ignored_files
-    ])
+    args, unknown = parser.parse_known_args()
 
-    # 3. Generate and print the unified tree
-    tree_output = generate_tree_output(all_files_for_tree)
-    print(tree_output)
+    # In viopi mode, we expect unknown args (they are for viopi). Otherwise, it's an error.
+    is_viopi_context = 'gemiv' in os.path.basename(sys.argv[0])
+    if unknown and not is_viopi_context:
+        # Re-run with the standard parser to get the default error message for unrecognized args.
+        parser.parse_args()
+
+    return args
+
+def _run_gemi():
+    """Core logic for the gemi/gemiv commands."""
+    # Two-pass argument parsing for --profile
+    profile_parser = argparse.ArgumentParser(add_help=False)
+    profile_parser.add_argument("-c", "--profile")
+    profile_args, _ = profile_parser.parse_known_args()
+
+    config = load_configuration(profile_name=profile_args.profile)
+    args = parse_arguments(config)
+
+    if not args.project:
+        sys.exit(f"{C.RED}Error: Google Cloud project ID is not set. Use --project or set in config.{C.END}")
+
+    if 'gemiv' not in os.path.basename(sys.argv[0]):
+        print_configuration_summary(args)
+
+    prompt_parts, payload_metadata = build_prompt_parts(args)
+    if not prompt_parts:
+        sys.exit(f"{C.RED}Error: Prompt is empty. Provide text, pipe from stdin, or attach files.{C.END}")
+
+    if not args.no_show_payload:
+        print_payload_summary(args, payload_metadata)
+
+    full_response = generate_response(args, prompt_parts)
+
+    handle_output(full_response, args)
+
+    print_request_summary(payload_metadata.get("prompt_components", {}))
+
+def main():
+    """Entry point for the `gemi` command."""
+    try:
+        _run_gemi()
+    except Exception as e:
+        sys.exit(f"\n{C.RED}An unexpected application error occurred: {e}{C.END}")
+
+def main_viopi_context():
+    """Entry point for `gemiv` - injects viopi context."""
+    if not shutil.which("viopi"):
+        sys.exit(f"{C.RED}Error: The 'gemiv' command requires 'viopi' to be installed and in your PATH.{C.END}")
+
+    # Build viopi command from all args, then pass them through to the main parser.
+    # This allows passing viopi-specific args, e.g., `gemiv -l python -- "prompt"`
+    viopi_command = " ".join(["viopi", "--stdout"] + sys.argv[1:])
+    original_args = sys.argv[1:]
+
+    # Rebuild argv for the main parser
+    sys.argv = [sys.argv[0], "--context", "--context-script", viopi_command] + original_args
+    main()
+
+def main_open():
+    """Entry point for `gemio` - forces --open behavior."""
+    # Inject --open argument before parsing
+    sys.argv.insert(1, "--open")
+    main()
+
+def main_viopi_context_open():
+    """Entry point for `gemivo` - injects viopi context and forces --open."""
+    if not shutil.which("viopi"):
+        sys.exit(f"{C.RED}Error: The 'gemivo' command requires 'viopi' to be installed and in your PATH.{C.END}")
+
+    # Build viopi command from all args, then pass them through to the main parser.
+    # This allows passing viopi-specific args, e.g., `gemivo -l python -- "prompt"`
+    viopi_command = " ".join(["viopi", "--stdout"] + sys.argv[1:])
+    original_args = sys.argv[1:]
+
+    # Rebuild argv for the main parser
+    sys.argv = [sys.argv[0], "--open", "--context", "--context-script", viopi_command] + original_args
+    main()
