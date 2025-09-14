@@ -7,7 +7,8 @@
   "settings": {
     "files.exclude": {
       "**/*.egg-info": true,
-      "**/build": true
+      "**/build": true,
+      "**/__pycache__": true
     },
     "search.exclude": {
       "**/build": true,

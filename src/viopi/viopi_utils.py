@@ -44,43 +44,42 @@ def get_file_list(
     
     target_path = Path(target_dir).resolve()
 
-    # Use PathSpec for pattern matching as well for consistency.
     pattern_spec = None
     if patterns:
         pattern_spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
-    all_files_in_walk = []
+    all_paths_in_walk = []
     for root, _, files in os.walk(target_dir, followlinks=follow_links):
         root_path = Path(root)
         for name in files:
-            # Ensure we have a fully resolved path to avoid ambiguity
-            all_files_in_walk.append((root_path / name).resolve())
+            all_paths_in_walk.append(root_path / name)
     
-    # Pathspec needs paths as strings, relative to the ignore_root, with POSIX separators.
-    # This dictionary maps the full physical path to the relative path for the ignore check.
-    paths_to_check_for_ignore = {
-        p: p.relative_to(ignore_root).as_posix() for p in all_files_in_walk
-    }
-    
-    # Get a set of all paths (as posix strings) that are ignored.
-    ignored_paths_by_spec = set(ignore_spec.match_files(paths_to_check_for_ignore.values()))
+    for original_path in all_paths_in_walk:
+        physical_path = original_path.resolve()
+        
+        try:
+            # This operation can fail if a symlink points outside ignore_root.
+            path_for_ignore_check = physical_path.relative_to(ignore_root).as_posix()
+            logical_path_str = str(physical_path.relative_to(target_path))
+        except ValueError:
+            # This file is outside the project root, likely via a symlink. Ignore it.
+            is_symlink = os.path.islink(original_path)
+            # Create a logical path relative to the symlink's location for display
+            logical_path_for_display = str(original_path.relative_to(target_path))
+            file_tuple = (str(physical_path), logical_path_for_display, is_symlink)
+            ignored_files.append(file_tuple)
+            continue # Skip to the next file
 
-    for physical_path in all_files_in_walk:
-        path_for_ignore_check = paths_to_check_for_ignore[physical_path]
-
-        # Logical path for display and pattern matching is relative to the target directory.
-        logical_path_str = str(physical_path.relative_to(target_path))
-        is_symlink = os.path.islink(physical_path) # Use os.path.islink for unresolved paths
+        is_symlink = os.path.islink(original_path)
         file_tuple = (str(physical_path), logical_path_str, is_symlink)
 
         # 1. Primary check: .viopi_ignore rules
-        if path_for_ignore_check in ignored_paths_by_spec:
+        if ignore_spec.match_file(path_for_ignore_check):
             ignored_files.append(file_tuple)
             continue
 
         # 2. Secondary check: CLI glob patterns (if provided)
         if pattern_spec:
-            # Match patterns against the logical path
             if not pattern_spec.match_file(logical_path_str):
                 ignored_files.append(file_tuple)
                 continue
