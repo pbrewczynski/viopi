@@ -1,10 +1,26 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {
-		"editor.wrappingColumn": 0 // Disable word wrapping
-	}
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/*.egg-info": true,
+      "**/build": true
+    },
+    "search.exclude": {
+      "**/build": true,
+      "**/*.egg-info": true
+    },
+    "editor.wordWrap": "on",
+    "editor.wordWrapColumn": 0,
+    "editor.wrappingIndent": "same",
+    "workbench.colorCustomizations": {
+      "titleBar.activeBackground": "#0a5200",
+      "titleBar.inactiveBackground": "#021400",
+      "titleBar.activeForeground": "#ffffff",
+      "titleBar.inactiveForeground": "#ffffff",
+    }
+  }
 }
