@@ -1,5 +1,3 @@
-
-
 # viopi_help.py
 # Displays the help message for the Viopi project.
 
@@ -40,6 +38,8 @@ Options:
   --minify              Minify code (JS, CSS, Py, HTML, JSON) to reduce token count.
                         Requires optional dependencies (e.g., 'pip install jsmin').
 
+  --line-numbers        Prepend line numbers to each line of file content.
+
   --no-follow-links     Disable following symbolic links.
 
 Examples:
@@ -51,6 +51,9 @@ Examples:
 
   # Pipe context to another tool
   viopi --stdout | llm -s "Summarize this"
+  
+  # Process a directory and add line numbers to the output
+  viopi --line-numbers ./my_project
 
   # Get structured JSON output and save it to a file
   viopi --json src/api > api_context.json
