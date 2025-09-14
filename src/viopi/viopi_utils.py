@@ -1,136 +1,128 @@
-import argparse
 import os
-import shutil
-import sys
+from pathlib import Path
+from typing import List, Tuple
 
-from .constants import C
-from .config import load_configuration
-from .prompt import build_prompt_parts
-from .client import generate_response
-from .output import (
-    handle_output,
-    print_configuration_summary,
-    print_payload_summary,
-    print_request_summary
-)
-from .utils import get_project_version
+import pathspec
 
-def parse_arguments(config):
-    """Parses command-line arguments, using loaded config for defaults."""
-    parser = argparse.ArgumentParser(
-        prog=os.path.basename(sys.argv[0]),
-        description=(
-            "A powerful, full-featured CLI for Google's Gemini models. \n"
-            "Prompt can be provided in three ways (in order of precedence):\n"
-            "1. Piped from stdin (e.g., `cat file.txt | gemi`)\n"
-            "2. Using the -p/--prompt flag (e.g., `gemi -p 'my prompt'`)\n"
-            "3. As positional arguments (e.g., `gemi my prompt text`)"
-        ),
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    # Argument definitions
-    parser.add_argument("prompt_positional", nargs='*', help="The text prompt as positional arguments. Used if -p/--prompt is not set.")
-    parser.add_argument("-p", "--prompt", help="The text prompt. Takes precedence over positional arguments.")
-    parser.add_argument("-f", "--file", dest="files", action="append", default=[], help="Path to a file for the prompt. Can be used multiple times.")
-    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {get_project_version()}")
-    parser.add_argument("-o", "--output", help="Path to save response to a file.")
-    parser.add_argument("--open", action="store_true", help="Open the response in a temporary markdown file (macOS only).")
-    parser.add_argument("-c", "--profile", help="Configuration profile to use.")
-    parser.add_argument("-x", "--context", action="store_true", help="Enable context from config (prefix, postfix, context_script). Default is disabled.")
+def format_bytes(size_bytes: int) -> str:
+    """Formats a size in bytes into a human-readable string (KiB, MiB, etc.)."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    size_kib = size_bytes / 1024
+    if size_kib < 1024:
+        return f"{size_kib:.2f} KiB"
+    size_mib = size_kib / 1024
+    if size_mib < 1024:
+        return f"{size_mib:.2f} MiB"
+    size_gib = size_mib / 1024
+    return f"{size_gib:.2f} GiB"
 
-    # Model and connection settings
-    parser.add_argument("--project", default=config.get('project'), help="Google Cloud project ID.")
-    parser.add_argument("--location", default=config.get('location'))
-    parser.add_argument("--model", default=config.get('model_name'), dest='model_name')
-    parser.add_argument("-t", "--temperature", type=float, default=float(config.get('temperature')))
-    parser.add_argument("--max-tokens", type=int, default=int(config.get('max_output_tokens')), dest='max_output_tokens')
-    parser.add_argument("--top-p", type=float, default=float(config.get('top_p')))
-    parser.add_argument("--top-k", type=int, default=int(config.get('top_k')))
-
-    # Context and output settings
-    parser.add_argument("--prefix-prompt", default=config.get('prefix_prompt'))
-    parser.add_argument("--postfix-prompt", default=config.get('postfix_prompt'))
-    parser.add_argument("--context-script", default=config.get('context_script'), help="Script whose stdout is injected as text context.")
-    parser.add_argument("--output-formatter", default=config.get('output_formatter'))
-    parser.add_argument("--no-show-payload", action="store_true", help="Do not print the final payload.")
-    parser.add_argument("--debug", action="store_true", help="Enable verbose payload output and write out-debug.json.")
-
-    args, unknown = parser.parse_known_args()
-
-    # In viopi mode, we expect unknown args (they are for viopi). Otherwise, it's an error.
-    is_viopi_context = 'gemiv' in os.path.basename(sys.argv[0])
-    if unknown and not is_viopi_context:
-        # Re-run with the standard parser to get the default error message for unrecognized args.
-        parser.parse_args()
-
-    return args
-
-def _run_gemi():
-    """Core logic for the gemi/gemiv commands."""
-    # Two-pass argument parsing for --profile
-    profile_parser = argparse.ArgumentParser(add_help=False)
-    profile_parser.add_argument("-c", "--profile")
-    profile_args, _ = profile_parser.parse_known_args()
-
-    config = load_configuration(profile_name=profile_args.profile)
-    args = parse_arguments(config)
-
-    if not args.project:
-        sys.exit(f"{C.RED}Error: Google Cloud project ID is not set. Use --project or set in config.{C.END}")
-
-    if 'gemiv' not in os.path.basename(sys.argv[0]):
-        print_configuration_summary(args)
-
-    prompt_parts, payload_metadata = build_prompt_parts(args)
-    if not prompt_parts:
-        sys.exit(f"{C.RED}Error: Prompt is empty. Provide text, pipe from stdin, or attach files.{C.END}")
-
-    if not args.no_show_payload:
-        print_payload_summary(args, payload_metadata)
-
-    full_response = generate_response(args, prompt_parts)
-
-    handle_output(full_response, args)
-
-    print_request_summary(payload_metadata.get("prompt_components", {}))
-
-def main():
-    """Entry point for the `gemi` command."""
+def is_binary_file(filepath: str, chunk_size: int = 1024) -> bool:
+    """
+    Checks if a file is likely binary by reading a chunk and looking for null bytes.
+    """
     try:
-        _run_gemi()
-    except Exception as e:
-        sys.exit(f"\n{C.RED}An unexpected application error occurred: {e}{C.END}")
+        with open(filepath, 'rb') as f:
+            chunk = f.read(chunk_size)
+        return b'\0' in chunk
+    except IOError:
+        return False # File cannot be read, treat as not binary for safety
 
-def main_viopi_context():
-    """Entry point for `gemiv` - injects viopi context."""
-    if not shutil.which("viopi"):
-        sys.exit(f"{C.RED}Error: The 'gemiv' command requires 'viopi' to be installed and in your PATH.{C.END}")
+def get_file_list(
+    target_dir: str,
+    patterns: List[str],
+    follow_links: bool,
+    ignore_spec: pathspec.PathSpec,
+    ignore_root: Path,
+) -> Tuple[List[Tuple[str, str, bool]], List[Tuple[str, str, bool]]]:
+    """
+    Walks the target directory to get a list of files, filtering based on
+    ignore specs and glob patterns.
+    """
+    files_to_process = []
+    ignored_files = []
+    
+    target_path = Path(target_dir).resolve()
 
-    # Build viopi command from all args, then pass them through to the main parser.
-    # This allows passing viopi-specific args, e.g., `gemiv -l python -- "prompt"`
-    viopi_command = " ".join(["viopi", "--stdout"] + sys.argv[1:])
-    original_args = sys.argv[1:]
+    # Use PathSpec for pattern matching as well for consistency.
+    pattern_spec = None
+    if patterns:
+        pattern_spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
-    # Rebuild argv for the main parser
-    sys.argv = [sys.argv[0], "--context", "--context-script", viopi_command] + original_args
-    main()
+    all_files_in_walk = []
+    for root, _, files in os.walk(target_dir, followlinks=follow_links):
+        root_path = Path(root)
+        for name in files:
+            # Ensure we have a fully resolved path to avoid ambiguity
+            all_files_in_walk.append((root_path / name).resolve())
+    
+    # Pathspec needs paths as strings, relative to the ignore_root, with POSIX separators.
+    # This dictionary maps the full physical path to the relative path for the ignore check.
+    paths_to_check_for_ignore = {
+        p: p.relative_to(ignore_root).as_posix() for p in all_files_in_walk
+    }
+    
+    # Get a set of all paths (as posix strings) that are ignored.
+    ignored_paths_by_spec = set(ignore_spec.match_files(paths_to_check_for_ignore.values()))
 
-def main_open():
-    """Entry point for `gemio` - forces --open behavior."""
-    # Inject --open argument before parsing
-    sys.argv.insert(1, "--open")
-    main()
+    for physical_path in all_files_in_walk:
+        path_for_ignore_check = paths_to_check_for_ignore[physical_path]
 
-def main_viopi_context_open():
-    """Entry point for `gemivo` - injects viopi context and forces --open."""
-    if not shutil.which("viopi"):
-        sys.exit(f"{C.RED}Error: The 'gemivo' command requires 'viopi' to be installed and in your PATH.{C.END}")
+        # Logical path for display and pattern matching is relative to the target directory.
+        logical_path_str = str(physical_path.relative_to(target_path))
+        is_symlink = os.path.islink(physical_path) # Use os.path.islink for unresolved paths
+        file_tuple = (str(physical_path), logical_path_str, is_symlink)
 
-    # Build viopi command from all args, then pass them through to the main parser.
-    # This allows passing viopi-specific args, e.g., `gemivo -l python -- "prompt"`
-    viopi_command = " ".join(["viopi", "--stdout"] + sys.argv[1:])
-    original_args = sys.argv[1:]
+        # 1. Primary check: .viopi_ignore rules
+        if path_for_ignore_check in ignored_paths_by_spec:
+            ignored_files.append(file_tuple)
+            continue
 
-    # Rebuild argv for the main parser
-    sys.argv = [sys.argv[0], "--open", "--context", "--context-script", viopi_command] + original_args
-    main()
+        # 2. Secondary check: CLI glob patterns (if provided)
+        if pattern_spec:
+            # Match patterns against the logical path
+            if not pattern_spec.match_file(logical_path_str):
+                ignored_files.append(file_tuple)
+                continue
+        
+        files_to_process.append(file_tuple)
+
+    return files_to_process, ignored_files
+
+def generate_tree_output(items: List[Tuple[str, bool, bool]]) -> str:
+    """
+    Generates a visual tree structure from a list of file paths.
+    items: list of (logical_path, is_symlink, is_ignored)
+    """
+    tree_dict = {}
+    # Sort items by path parts to ensure correct ordering
+    sorted_items = sorted(items, key=lambda x: Path(x[0]).parts)
+
+    for path, is_symlink, is_ignored in sorted_items:
+        parts = Path(path).parts
+        current_level = tree_dict
+        for part in parts[:-1]: # Iterate through directories
+            current_level = current_level.setdefault(part, {})
+        
+        # Set file data at the final level
+        filename = parts[-1]
+        current_level[filename] = {'__meta__': {'is_symlink': is_symlink, 'is_ignored': is_ignored}}
+
+    def build_tree_lines(d, prefix=""):
+        lines = []
+        # Sort keys to ensure consistent order: directories first, then files
+        entries = sorted(d.keys(), key=lambda k: '__meta__' not in d[k])
+        
+        for i, name in enumerate(entries):
+            content = d[name]
+            connector = "└── " if i == len(entries) - 1 else "├── "
+            lines.append(prefix + connector + name)
+            
+            if '__meta__' not in content: # It's a directory
+                extension = "    " if i == len(entries) - 1 else "│   "
+                lines.extend(build_tree_lines(content, prefix + extension))
+        return lines
+
+    tree_lines = build_tree_lines(tree_dict)
+    header = "\n--- File Tree ---\n"
+    return header + "\n".join(tree_lines) if tree_lines else ""
